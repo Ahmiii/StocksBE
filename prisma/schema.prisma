@@ -12,7 +12,7 @@ model User {
   email             String          @unique @db.VarChar(255)
   fullName          String          @map("full_name") @db.VarChar(120)
   createdAt         DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
-  brokerConnections BrokerAccount[]
+  brokerAccounts    BrokerAccount[]
   portfolios        Portfolio[]
   @@map("users")
 }
@@ -28,10 +28,11 @@ model BrokerAccount {
   syncCursor     String?     @map("sync_cursor") @db.VarChar(255)
   lastSyncedAt   DateTime?   @map("last_synced_at") @db.Timestamptz
   createdAt      DateTime    @default(now()) @map("created_at") @db.Timestamptz
-  creator        User?       @relation(fields: [userId], references: [id])
+  user           User        @relation(fields: [userId], references: [id])
   portfolios     Portfolio[]
   @@unique([userId, broker, clientCode])
-  @@map("broker_account")
+  @@index([userId])
+  @@map("broker_accounts")
   trades Trade[]
 }
 
@@ -44,6 +45,7 @@ model Portfolio {
   createdAt       DateTime       @default(now()) @map("created_at") @db.Timestamptz
   user            User           @relation(fields: [userId], references: [id])
   brokerAccount   BrokerAccount? @relation(fields: [brokerAccountId], references: [id])
+  @@index([userId])
   @@map("portfolios")
   trades Trade[]
   positions Position[]
@@ -85,8 +87,10 @@ model Trade {
   // Relations
   portfolio     Portfolio      @relation(fields: [portfolioId], references: [id])
   security      Security       @relation(fields: [securityId], references: [id])
-  brokerAccount BrokerAccount? @relation(fields: [brokerAccountId], references: [id])
-  @@unique([brokerAccountId, brokerTradeId])  
+  brokerAccount BrokerAccount? @relation(fields: [brokerAccountId], references: [id], onDelete: Restrict)
+  @@unique([brokerAccountId, brokerTradeId])
+  @@index([portfolioId, executedAt(sort: Desc)])
+  @@index([securityId])
   @@map("trades")
 }
 model Position {
@@ -101,7 +105,8 @@ model Position {
   security  Security  @relation(fields: [securityId], references: [id])
 
   @@unique([portfolioId, securityId])
-  
+  @@index([securityId])
+
   @@map("positions")
 }
 
