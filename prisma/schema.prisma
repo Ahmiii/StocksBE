@@ -1,0 +1,88 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id                String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email             String          @unique @db.VarChar(255)
+  fullName          String          @map("full_name") @db.VarChar(120)
+  createdAt         DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  brokerConnections BrokerAccount[]
+  portfolios        Portfolio[]
+  @@map("users")
+}
+
+model BrokerAccount {
+  id             String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId         String      @map("user_id") @db.Uuid
+  broker         String      @default("AHL_ETRADE") @db.VarChar(32)
+  clientCode     String      @map("client_code") @db.VarChar(64)
+  credentialsEnc String?     @map("credentials_enc")
+  tokenExpiresAt DateTime?   @map("token_expires_at") @db.Timestamptz
+  syncStatus     String      @default("idle") @map("sync_status") @db.VarChar(16)
+  syncCursor     String?     @map("sync_cursor") @db.VarChar(255)
+  lastSyncedAt   DateTime?   @map("last_synced_at") @db.Timestamptz
+  createdAt      DateTime    @default(now()) @map("created_at") @db.Timestamptz
+  creator        User?       @relation(fields: [userId], references: [id])
+  portfolios     Portfolio[]
+  @@unique([userId, broker, clientCode])
+  @@map("broker_account")
+  trades Trade[]
+}
+
+model Portfolio {
+  id              String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId          String         @map("user_id") @db.Uuid
+  brokerAccountId String?        @unique @map("broker_account_id") @db.Uuid
+  name            String         @db.VarChar(120)
+  baseCurrency    String         @default("PKR") @map("base_currency") @db.Char(3)
+  createdAt       DateTime       @default(now()) @map("created_at") @db.Timestamptz
+  user            User           @relation(fields: [userId], references: [id])
+  brokerAccount   BrokerAccount? @relation(fields: [brokerAccountId], references: [id])
+  @@map("portfolios")
+  trades Trade[]
+}
+
+model Security {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  symbol        String   @unique @db.VarChar(16)
+  isin          String?  @unique @db.VarChar(12)
+  companyName   String   @map("company_name") @db.VarChar(255)
+  sector        String?  @db.VarChar(120)
+  listingStatus String   @default("listed") @map("listing_status") @db.VarChar(16)
+  updatedAt     DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@map("securities")
+  trades Trade[]
+}
+
+model Trade {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  portfolioId     String   @map("portfolio_id") @db.Uuid
+  securityId      String   @map("security_id") @db.Uuid
+  brokerAccountId String?  @map("broker_account_id") @db.Uuid
+  brokerTradeId   String?  @map("broker_trade_id") @db.VarChar(64)
+  brokerOrderId   String?  @map("broker_order_id") @db.VarChar(64)
+  side            String   @db.VarChar(4)
+  quantity        Decimal  @db.Decimal(18, 4)
+  price           Decimal  @db.Decimal(18, 4)
+  commission      Decimal  @default(0) @db.Decimal(18, 4)
+  taxesLevies     Decimal  @default(0) @map("taxes_levies") @db.Decimal(18, 4)
+  netAmount       Decimal  @map("net_amount") @db.Decimal(18, 4)
+  executedAt      DateTime @map("executed_at") @db.Timestamptz
+  source          String   @default("broker_sync") @db.VarChar(16)
+  rawPayload      Json?    @map("raw_payload")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  // Relations
+  portfolio     Portfolio      @relation(fields: [portfolioId], references: [id])
+  security      Security       @relation(fields: [securityId], references: [id])
+  brokerAccount BrokerAccount? @relation(fields: [brokerAccountId], references: [id])
+  @@unique([brokerAccountId, brokerTradeId])  
+  @@map("trades")
+}
