@@ -2,7 +2,7 @@ import { prisma } from "../config/db.js";
 import bcrypt from "bcryptjs";
 import { generateWebToken } from "../utils/generateToken.js";
 const register = async (req, res) => {
-  const { email, password, full_name } = req?.body;
+  const { email, password, fullName } = req?.body;
   const userExists = await prisma?.user?.findUnique({
     where: {
       email: email,
@@ -20,7 +20,7 @@ const register = async (req, res) => {
     data: {
       email: email,
       passwordHash: hashedPassword,
-      fullName: full_name,
+      fullName: fullName,
     },
   });
   const token = generateWebToken(
@@ -34,7 +34,7 @@ const register = async (req, res) => {
     message: "success",
     data: {
       id: user?.id,
-      name: user?.fullName,
+      fullName: user?.fullName,
     },
     token,
   });
@@ -73,7 +73,7 @@ const login = async (req, res) => {
     data: {
       user: {
         id: user?.id,
-        name: user?.fullName,
+        fullName: user?.fullName,
         email: email,
       },
       token,

@@ -9,7 +9,7 @@ import { authMiddleware } from "../middlewares/authMiddleware.js";
 const router = express.Router();
 router.use(authMiddleware);
 
-router.post("/account_info", getAHLSession);
+router.post("/accounts", getAHLSession);
 router.get("/accounts", getAccounts);
 router.patch("/accounts/:id/disconnect", disconnectAccount);
 

@@ -78,11 +78,11 @@ const submitLogin = async ({
 };
 
 const getAHLSession = async (req, res) => {
-  const { account_number, password } = req.body ?? {};
+  const { accountNumber, password } = req.body ?? {};
 
-  if (!account_number || !password) {
+  if (!accountNumber || !password) {
     return res.status(400).json({
-      error: "account_number and password are required.",
+      error: "accountNumber and password are required.",
     });
   }
 
@@ -107,7 +107,7 @@ const getAHLSession = async (req, res) => {
   }
 
   const login = await submitLogin({
-    accountNumber: account_number,
+    accountNumber,
     password,
     sessionCookie: loginPage.sessionCookie,
     enabledDigits: loginPage.enabledDigits,
@@ -126,10 +126,10 @@ const getAHLSession = async (req, res) => {
       userId_broker_clientCode: {
         userId: req.user.id,
         broker: BROKER_CODE,
-        clientCode: account_number,
+        clientCode: accountNumber,
       },
     },
-    create: { userId: req.user.id, clientCode: account_number },
+    create: { userId: req.user.id, clientCode: accountNumber },
     update: { syncStatus: SYNC_STATUS.IDLE },
   });
 
@@ -138,7 +138,7 @@ const getAHLSession = async (req, res) => {
     create: {
       userId: req.user.id,
       brokerAccountId: brokerAccount.id,
-      name: `AHL ${account_number}`,
+      name: `AHL ${accountNumber}`,
     },
     update: {},
   });
