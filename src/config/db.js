@@ -7,15 +7,18 @@ const adapter = new PrismaPg({
 });
 const prisma = new PrismaClient({ adapter });
 
-export const connectDB = async () => {
-	try {
-		await prisma.$connect();
-		await prisma.$queryRaw`SELECT 1`;
-		console.log('PostgreSQL connected');
-	} catch (error) {
-        console.error('Error connecting to PostgreSQL:', error);
-        throw error;
-	}
+const connectDB = async () => {
+  try {
+    await prisma.$connect();
+    console.log("DB Connect via Prisma");
+  } catch (error) {
+    console.error(`DB Connection error: ${error.message}`);
+    process.exit(1);
+  }
 };
 
-export default prisma;
+const disconnectDB = async () => {
+  await prisma.$disconnect();
+};
+
+export { connectDB, disconnectDB, prisma };
