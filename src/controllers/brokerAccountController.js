@@ -4,8 +4,6 @@ import {
   NAVIGATION_HEADERS,
   BROKER_URL,
   BROKER_LOGIN_PATH,
-  AHL_SESSION_COOKIE,
-  AHL_SESSION_MAX_AGE_MS,
 } from "../config/constants.js";
 import {
   extractSessionCookie,
@@ -13,7 +11,6 @@ import {
   parseEnabledDigits,
   isInvalidLogin,
   buildLoginBody,
-  buildCookieHeader,
 } from "../utils/extractAHLInfor.js";
 
 // Never follow redirects: a 302 would drop the Set-Cookie headers we need off
@@ -120,21 +117,11 @@ const getAHLSession = async (req, res) => {
     });
   }
 
-  // Hand the broker session back as our own cookie. Any HTTP client with a
-  // cookie jar (Postman, a browser) will replay it on later /broker routes,
-  // where requireAHLSession picks it up as req.brokerCookie.
-  const cookieJar = { ...loginPage.cookieJar, ...login.cookieJar };
-  res.cookie(AHL_SESSION_COOKIE, buildCookieHeader(cookieJar), {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    maxAge: AHL_SESSION_MAX_AGE_MS,
-    path: "/",
-  });
-
   res.status(200).json({
     data: {
       status: login.status,
+      sessionCookie: login.sessionCookie,
+      cookies: { ...loginPage.cookieJar, ...login.cookieJar },
       enabledDigits: loginPage.enabledDigits,
     },
   });

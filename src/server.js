@@ -1,5 +1,4 @@
 import express from "express";
-import cookieParser from "cookie-parser";
 import { connectDB, disconnectDB } from "./config/db.js";
 import AuthRoutes from "./routes/authRoutes.js";
 import BrokerAcccountRoutes from "./routes/brokerAccountRoutes.js";
@@ -7,7 +6,6 @@ connectDB();
 
 const app = express();
 app.use(express.json());
-app.use(cookieParser());
 app.use("/auth", AuthRoutes);
 app.use("/broker", BrokerAcccountRoutes);
 const PORT = process.env.PORT || 5001;

@@ -36,14 +36,6 @@ const SESSION_COOKIE_NAME = ".AspNetCore.Session";
 // Marker the broker renders in the HTML when the credentials are rejected.
 const INVALID_LOGIN_PATTERN = /Invalid Login Credentials/i;
 
-// Our own cookie, handed to the API client, holding the broker cookie header we
-// need to replay on later broker calls.
-const AHL_SESSION_COOKIE = "ahl_session";
-
-// Broker sessions expire on their own; this just stops a stale cookie lingering
-// in the client forever.
-const AHL_SESSION_MAX_AGE_MS = 1000 * 60 * 20;
-
 export {
   BROWSER_HEADERS,
   NAVIGATION_HEADERS,
@@ -51,6 +43,4 @@ export {
   BROKER_LOGIN_PATH,
   SESSION_COOKIE_NAME,
   INVALID_LOGIN_PATTERN,
-  AHL_SESSION_COOKIE,
-  AHL_SESSION_MAX_AGE_MS,
 };
