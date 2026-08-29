@@ -1,8 +1,11 @@
+import { prisma } from "../config/db.js";
 import axios from "axios";
 import {
   BROWSER_HEADERS,
   NAVIGATION_HEADERS,
   BROKER_URL,
+  BROKER_CODE,
+  SYNC_STATUS,
   BROKER_LOGIN_PATH,
 } from "../config/constants.js";
 import {
@@ -96,7 +99,6 @@ const getAHLSession = async (req, res) => {
     });
   }
 
-
   const lastDigit = Math.max(...loginPage.enabledDigits);
   if (password.length < lastDigit) {
     return res.status(400).json({
@@ -117,8 +119,34 @@ const getAHLSession = async (req, res) => {
     });
   }
 
+  // Re-linking a previously disconnected account reuses the same row, so the
+  // trade dedupe key stays stable.
+  const brokerAccount = await prisma.brokerAccount.upsert({
+    where: {
+      userId_broker_clientCode: {
+        userId: req.user.id,
+        broker: BROKER_CODE,
+        clientCode: account_number,
+      },
+    },
+    create: { userId: req.user.id, clientCode: account_number },
+    update: { syncStatus: SYNC_STATUS.IDLE },
+  });
+
+  const portfolio = await prisma.portfolio.upsert({
+    where: { brokerAccountId: brokerAccount.id },
+    create: {
+      userId: req.user.id,
+      brokerAccountId: brokerAccount.id,
+      name: `AHL ${account_number}`,
+    },
+    update: {},
+  });
+
   res.status(200).json({
     data: {
+      brokerAccountId: brokerAccount.id,
+      portfolioId: portfolio.id,
       status: login.status,
       sessionCookie: login.sessionCookie,
       cookies: { ...loginPage.cookieJar, ...login.cookieJar },
@@ -127,4 +155,50 @@ const getAHLSession = async (req, res) => {
   });
 };
 
-export { getAHLSession };
+const getAccounts = async (req, res) => {
+  const accounts = await prisma.brokerAccount.findMany({
+    where: { userId: req.user.id },
+    select: {
+      id: true,
+      broker: true,
+      clientCode: true,
+      syncStatus: true,
+      lastSyncedAt: true,
+      createdAt: true,
+      portfolios: { select: { id: true, name: true } },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+  res.status(200).json({
+    message: "success",
+    data: {
+      accounts,
+    },
+  });
+};
+
+const disconnectAccount = async (req, res) => {
+  try {
+    const account = await prisma.brokerAccount.update({
+      where: { id: req.params.id, userId: req.user.id },
+      data: {
+        credentialsEnc: null,
+        tokenExpiresAt: null,
+        syncStatus: SYNC_STATUS.DISCONNECTED,
+      },
+      select: { id: true, clientCode: true, syncStatus: true },
+    });
+
+    return res.status(200).json({
+      message: "account disconnected successfully",
+      data: { account },
+    });
+  } catch (error) {
+    if (error.code === "P2025") {
+      return res.status(404).json({ error: "account does not exist" });
+    }
+    throw error;
+  }
+};
+
+export { getAHLSession, getAccounts, disconnectAccount };

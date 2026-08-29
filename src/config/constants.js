@@ -26,6 +26,17 @@ const NAVIGATION_HEADERS = {
 
 const BROKER_URL = process.env.BROKER_URL;
 
+// Must match the BrokerAccount.broker default in schema.prisma — it is part of
+// the @@unique([userId, broker, clientCode]) key.
+const BROKER_CODE = "AHL_ETRADE";
+
+// syncStatus values. "disconnected" means the user unlinked the account: the
+// stored credentials are cleared but the trade history is kept.
+const SYNC_STATUS = {
+  IDLE: "idle",
+  DISCONNECTED: "disconnected",
+};
+
 // Path the login form posts to, relative to BROKER_URL.
 const BROKER_LOGIN_PATH = "/Home/_Login";
 
@@ -40,6 +51,8 @@ export {
   BROWSER_HEADERS,
   NAVIGATION_HEADERS,
   BROKER_URL,
+  BROKER_CODE,
+  SYNC_STATUS,
   BROKER_LOGIN_PATH,
   SESSION_COOKIE_NAME,
   INVALID_LOGIN_PATTERN,
