@@ -1,5 +1,6 @@
 const BASE_URL = "https://web.ahletrade.com";
-const DASHBOARD_URL = "https://data.arifhabibltd.com/api/v3";
+const DASHBOARD_URL = "
+";
 const DASHBOARD_ORIGIN = new URL(DASHBOARD_URL).origin; // https://data.arifhabibltd.com
 const USERNAME = process.env.AHL_USERNAME || "CC24944";
 const PASSWORD = process.env.AHL_PASSWORD || "Stock1234";

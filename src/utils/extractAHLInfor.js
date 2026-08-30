@@ -51,6 +51,13 @@ export const parseEnabledDigits = (html) => {
 
 export const isInvalidLogin = (html) => INVALID_LOGIN_PATTERN.test(html);
 
+// Flatten a { name: value } jar back into a Cookie header string, so a later
+// request can replay the whole broker session in one go.
+export const buildCookieHeader = (jar) =>
+  Object.entries(jar)
+    .map(([name, value]) => `${name}=${value}`)
+    .join("; ");
+
 /* -------------------------------------------------------------------------- */
 /* Request building                                                           */
 /* -------------------------------------------------------------------------- */

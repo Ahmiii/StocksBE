@@ -3,6 +3,7 @@ import {
   getAHLSession,
   getAccounts,
   disconnectAccount,
+  getHistory
 } from "../controllers/brokerAccountController.js";
 import { authMiddleware } from "../middlewares/authMiddleware.js";
 
@@ -12,5 +13,6 @@ router.use(authMiddleware);
 router.post("/accounts", getAHLSession);
 router.get("/accounts", getAccounts);
 router.patch("/accounts/:id/disconnect", disconnectAccount);
+router.get("/accounts/:id/sync", getHistory);
 
 export default router;

@@ -24,6 +24,16 @@ const NAVIGATION_HEADERS = {
   "upgrade-insecure-requests": "1",
 };
 
+// Headers a browser adds for an in-page XHR, i.e. the order-history call. The
+// broker checks x-requested-with and answers with JSON instead of a document.
+const AJAX_HEADERS = {
+  accept: "*/*",
+  "x-requested-with": "XMLHttpRequest",
+  "sec-fetch-dest": "empty",
+  "sec-fetch-mode": "cors",
+  "sec-fetch-site": "same-origin",
+};
+
 const BROKER_URL = process.env.BROKER_URL;
 
 // Must match the BrokerAccount.broker default in schema.prisma — it is part of
@@ -40,6 +50,16 @@ const SYNC_STATUS = {
 // Path the login form posts to, relative to BROKER_URL.
 const BROKER_LOGIN_PATH = "/Home/_Login";
 
+// The endpoint really is spelled "GetOrderHisotry" — that is the broker's own
+// typo. Correcting it 404s.
+const BROKER_HISTORY_PATH = "/Home/GetOrderHisotry";
+
+// The order-history call wants trader + HouseName cookies alongside the session.
+const BROKER_HOUSE_NAME = process.env.BROKER_HOUSE_NAME || "AHL";
+
+// Order history is fetched over a date range; default to everything.
+const HISTORY_DEFAULT_FROM = "2022-01-01";
+
 // The ASP.NET session cookie the broker issues on the login page and refreshes
 // on a successful login.
 const SESSION_COOKIE_NAME = ".AspNetCore.Session";
@@ -50,10 +70,14 @@ const INVALID_LOGIN_PATTERN = /Invalid Login Credentials/i;
 export {
   BROWSER_HEADERS,
   NAVIGATION_HEADERS,
+  AJAX_HEADERS,
   BROKER_URL,
   BROKER_CODE,
   SYNC_STATUS,
   BROKER_LOGIN_PATH,
+  BROKER_HISTORY_PATH,
+  BROKER_HOUSE_NAME,
+  HISTORY_DEFAULT_FROM,
   SESSION_COOKIE_NAME,
   INVALID_LOGIN_PATTERN,
 };
