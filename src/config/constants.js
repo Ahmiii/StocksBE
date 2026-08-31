@@ -54,6 +54,11 @@ const BROKER_LOGIN_PATH = "/Home/_Login";
 // typo. Correcting it 404s.
 const BROKER_HISTORY_PATH = "/Home/GetOrderHisotry";
 
+// Holdings sitting in the broker-linked CDC account — the tradable ones. Shares
+// moved to a sub-investor CDC account are NOT listed here, so this is a subset
+// of what the trade history implies you own.
+const BROKER_COLLATERALS_PATH = "/Home/GetCollaterals";
+
 // The order-history call wants trader + HouseName cookies alongside the session.
 const BROKER_HOUSE_NAME = process.env.BROKER_HOUSE_NAME || "AHL";
 
@@ -76,6 +81,7 @@ export {
   SYNC_STATUS,
   BROKER_LOGIN_PATH,
   BROKER_HISTORY_PATH,
+  BROKER_COLLATERALS_PATH,
   BROKER_HOUSE_NAME,
   HISTORY_DEFAULT_FROM,
   SESSION_COOKIE_NAME,

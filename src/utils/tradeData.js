@@ -48,6 +48,71 @@ export const normalizeTradeRows = (rows) => {
   return normalizeRows;
 };
 
+// Folds the broker's collaterals into the positions computed from trades.
+//
+// GetCollaterals lists only what sits in the broker-linked CDC account, and it
+// is already adjusted for splits and bonus issues — so where a symbol appears
+// there, its quantity and average cost are more current than anything we can
+// derive from trades. Symbols missing from it are held in the sub-investor CDC
+// account; those keep the computed figures.
+//
+// realizedPnl always comes from the trade walk: collaterals reports plSettled
+// as 0 and knows nothing about closed positions.
+export const mergePositions = ({ computed, collaterals, securityIdBySymbol }) => {
+  const bySecurityId = new Map(
+    (computed ?? []).map((p) => [p.securityId, { ...p, source: "trades" }]),
+  );
+
+  for (const row of collaterals ?? []) {
+    const securityId = securityIdBySymbol.get(row?.symbol);
+    if (!securityId) continue;
+
+    const fromTrades = bySecurityId.get(securityId);
+    bySecurityId.set(securityId, {
+      securityId,
+      quantity: Number(row?.quantityTotal),
+      avgCost: Number(row?.avgRateBuy),
+      realizePnl: fromTrades?.realizePnl ?? 0,
+      source: "collaterals",
+    });
+  }
+
+  return [...bySecurityId.values()];
+};
+
+// Symbols where the broker's share count disagrees with ours. A positive delta
+// with a matching cost basis means a split or bonus we never saw; a negative one
+// means either shares sitting in the sub-investor account or a missed sell.
+export const reconcilePositions = ({ computed, collaterals, securityIdBySymbol }) => {
+  const bySecurityId = new Map((computed ?? []).map((p) => [p.securityId, p]));
+  const mismatches = [];
+
+  for (const row of collaterals ?? []) {
+    const securityId = securityIdBySymbol.get(row?.symbol);
+    const ours = securityId ? bySecurityId.get(securityId) : undefined;
+    if (!ours) continue;
+
+    const brokerQty = Number(row?.quantityTotal);
+    if (ours.quantity === brokerQty) continue;
+
+    const ourCost = ours.quantity * ours.avgCost;
+    const brokerCost = brokerQty * Number(row?.avgRateBuy);
+
+    mismatches.push({
+      symbol: row.symbol,
+      computedQty: ours.quantity,
+      brokerQty,
+      delta: brokerQty - ours.quantity,
+      impliedRatio: Number((brokerQty / ours.quantity).toFixed(6)),
+      // Unchanged total cost is the signature of a split or bonus rather than a
+      // trade we failed to import.
+      costBasisMatches: Math.abs(ourCost - brokerCost) < Math.max(1, ourCost * 0.001),
+    });
+  }
+
+  return mismatches;
+};
+
 export const calculatePositions = (trades) => {
   let groupedData = Object.groupBy(trades, (trade) => trade.securityId);
   let parsData = Object.entries(groupedData).map(([key, value]) => {

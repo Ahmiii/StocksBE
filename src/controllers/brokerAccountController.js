@@ -9,6 +9,7 @@ import {
   SYNC_STATUS,
   BROKER_LOGIN_PATH,
   BROKER_HISTORY_PATH,
+  BROKER_COLLATERALS_PATH,
   BROKER_HOUSE_NAME,
   HISTORY_DEFAULT_FROM,
 } from "../config/constants.js";
@@ -25,7 +26,12 @@ import {
   getSession,
   clearSession,
 } from "../services/brokderSessionStore.js";
-import { calculatePositions, normalizeTradeRows } from "../utils/tradeData.js";
+import {
+  calculatePositions,
+  mergePositions,
+  reconcilePositions,
+  normalizeTradeRows,
+} from "../utils/tradeData.js";
 // Never follow redirects: a 302 would drop the Set-Cookie headers we need off
 // the hop that issued them, and the login POST answers with one on success.
 const NO_REDIRECT = {
@@ -111,6 +117,41 @@ const fetchOrderHistory = async ({ clientCode, session, params }) => {
 
   const response = await axios.get(
     `${BROKER_URL}${BROKER_HISTORY_PATH}?${query}`,
+    {
+      headers: {
+        ...BROWSER_HEADERS,
+        ...AJAX_HEADERS,
+        Referer: `${BROKER_URL}/Home/Index`,
+        cookie: buildCookieHeader(jar),
+      },
+      ...NO_REDIRECT_RAW,
+    },
+  );
+
+  try {
+    return {
+      status: response.status,
+      data: JSON.parse(response.data),
+      isJson: true,
+    };
+  } catch {
+    return { status: response.status, data: response.data, isJson: false };
+  }
+};
+
+// Holdings currently in the broker-linked CDC account, already adjusted for
+// splits and bonus issues. Also carries mtmPrice, the current market price.
+const fetchColletralHistory = async ({ clientCode, session }) => {
+  // Layer defaults under the real login cookies so trader/HouseName are always
+  // present even if the login response did not set them; real values win.
+  const jar = {
+    trader: clientCode,
+    HouseName: BROKER_HOUSE_NAME,
+    ...session.cookieJar,
+  };
+
+  const response = await axios.get(
+    `${BROKER_URL}${BROKER_COLLATERALS_PATH}?account=${encodeURIComponent(clientCode)}`,
     {
       headers: {
         ...BROWSER_HEADERS,
@@ -294,6 +335,11 @@ const getHistory = async (req, res) => {
     params,
   });
 
+  const collateral = await fetchColletralHistory({
+    clientCode: account.clientCode,
+    session,
+  });
+
   // Non-JSON means the broker served the login page instead: the session died
   // early. Drop it so the next request does not reuse a known-dead jar.
   if (!history.isJson) {
@@ -302,8 +348,23 @@ const getHistory = async (req, res) => {
       error: "Broker session expired. Reconnect the account to continue.",
     });
   }
+
+  // Collaterals is an enhancement, not a requirement — a bad response there
+  // should not lose the trade sync.
+  const collateralRows = collateral.isJson && Array.isArray(collateral.data)
+    ? collateral.data
+    : [];
+
   const data = normalizeTradeRows(history?.data);
-  const symbols = [...new Set(data?.map((trade) => trade?.symbol))];
+
+  // Both sources, so a symbol held only in the broker account still gets a
+  // Security row to hang its position and price off.
+  const symbols = [
+    ...new Set([
+      ...(data ?? []).map((trade) => trade?.symbol),
+      ...collateralRows.map((row) => row?.symbol),
+    ]),
+  ].filter(Boolean);
   const securities = symbols?.map((value) =>
     prisma.security.upsert({
       where: { symbol: value },
@@ -365,7 +426,22 @@ const getHistory = async (req, res) => {
     },
     orderBy: { executedAt: "asc" },
   });
-  const posotion = calculatePositions(allTrades);
+  const computed = calculatePositions(allTrades);
+
+  const posotion = mergePositions({
+    computed,
+    collaterals: collateralRows,
+    securityIdBySymbol,
+  });
+
+  // Surfaced rather than corrected: a split we never saw shows up here as a
+  // positive delta with a matching cost basis.
+  const mismatches = reconcilePositions({
+    computed,
+    collaterals: collateralRows,
+    securityIdBySymbol,
+  });
+
   const positionUpsert = posotion?.map((value) =>
     prisma.position.upsert({
       where: {
@@ -389,12 +465,42 @@ const getHistory = async (req, res) => {
     }),
   );
   await prisma.$transaction(positionUpsert);
-  console.log({ posotion });
+
+  // mtmPrice is today's market price — the only price feed we have, and it only
+  // covers the broker-held symbols.
+  const tradeDate = new Date();
+  tradeDate.setUTCHours(0, 0, 0, 0);
+
+  const priceUpsert = collateralRows
+    .filter((row) => securityIdBySymbol.get(row?.symbol) && row?.mtmPrice != null)
+    .map((row) =>
+      prisma.dailyPrice.upsert({
+        where: {
+          securityId_tradeDate: {
+            securityId: securityIdBySymbol.get(row.symbol),
+            tradeDate,
+          },
+        },
+        create: {
+          securityId: securityIdBySymbol.get(row.symbol),
+          tradeDate,
+          close: row.mtmPrice,
+        },
+        update: { close: row.mtmPrice, fetchedAt: new Date() },
+      }),
+    );
+  await prisma.$transaction(priceUpsert);
+
   res.status(200).json({
     message: "success",
     data: {
       securities: securityRes.length,
       trades: tradesRes.length,
+      positions: posotion.length,
+      prices: priceUpsert.length,
+      fromCollaterals: posotion.filter((p) => p.source === "collaterals").length,
+      fromTrades: posotion.filter((p) => p.source === "trades").length,
+      mismatches,
       from: params.fromdate,
       to: params.todate,
     },

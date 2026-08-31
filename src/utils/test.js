@@ -128,8 +128,6 @@ const login = async () => {
   if (enabledDigits.length === 0)
     throw new Error("No enabled Digit fields found in the login page.");
 
-  console.log("Enabled digit positions:", enabledDigits.join(", "));
-
   // 2. POST the credentials, echoing the same session cookie back.
   const body = buildLoginBody(USERNAME, PASSWORD, enabledDigits);
   const loginResponse = await fetch(`${BASE_URL}/Home/_Login`, {
