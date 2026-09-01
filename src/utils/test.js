@@ -292,7 +292,7 @@ const getOrderHistory = async (
 /* ---------------------------------------------------------------------------
  * Session management
  *
- * The full handshake (login -> analytics URL -> dashboard handoff -> JWT) is
+ * The full handshake (login -> analytics URL -> analhandoff -> JWT) is
  * expensive, so we cache the resulting bearer token + cookie jar and reuse
  * them until the JWT is close to expiring. Concurrent refreshes are coalesced
  * into a single login flow so a burst of requests doesn't trigger many logins.

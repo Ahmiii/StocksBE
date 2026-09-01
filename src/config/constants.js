@@ -72,6 +72,11 @@ const SESSION_COOKIE_NAME = ".AspNetCore.Session";
 // Marker the broker renders in the HTML when the credentials are rejected.
 const INVALID_LOGIN_PATTERN = /Invalid Login Credentials/i;
 
+// Returns a one-time handoff URL into the analytics dashboard. Following that
+// URL is what makes arifhabib issue its own laravel_session cookie — which is
+// the credential their market API actually checks.
+const BROKER_ANALYTICS_PATH = "/Home/GetAnalyticsURL";
+
 export {
   BROWSER_HEADERS,
   NAVIGATION_HEADERS,
@@ -86,4 +91,5 @@ export {
   HISTORY_DEFAULT_FROM,
   SESSION_COOKIE_NAME,
   INVALID_LOGIN_PATTERN,
+  BROKER_ANALYTICS_PATH,
 };

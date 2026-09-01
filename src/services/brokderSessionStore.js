@@ -23,4 +23,44 @@ const getSession = (brokerAccountId) => {
 
 const clearSession = (brokerAccountId) => sessions.delete(brokerAccountId);
 
-export { saveSession, getSession, clearSession };
+/* -------------------------------------------------------------------------- */
+/* Market data session                                                        */
+/*                                                                            */
+/* The analytics dashboard is a different host with its own cookie. Its server */
+/* sends Max-Age=7200, so we hold it a little under two hours and re-run the   */
+/* handoff when it lapses.                                                    */
+/* -------------------------------------------------------------------------- */
+
+// brokerAccountId -> { cookieHeader, expiresAt }
+const marketSessions = new Map();
+const MARKET_TTL_MS = 110 * 60 * 1000;
+
+const saveMarketSession = (brokerAccountId, { cookieHeader }) => {
+  marketSessions.set(brokerAccountId, {
+    cookieHeader,
+    expiresAt: Date.now() + MARKET_TTL_MS,
+  });
+};
+
+const getMarketSession = (brokerAccountId) => {
+  const session = marketSessions.get(brokerAccountId);
+  if (!session) return null;
+
+  if (Date.now() >= session.expiresAt) {
+    marketSessions.delete(brokerAccountId);
+    return null;
+  }
+  return session;
+};
+
+const clearMarketSession = (brokerAccountId) =>
+  marketSessions.delete(brokerAccountId);
+
+export {
+  saveSession,
+  getSession,
+  clearSession,
+  saveMarketSession,
+  getMarketSession,
+  clearMarketSession,
+};
