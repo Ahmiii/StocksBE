@@ -215,6 +215,7 @@ const syncPrices = async (req, res) => {
     where: {
       OR: [
         { positions: { some: { quantity: { gt: 0 } } } },
+        { watchlistItems: { some: {} } },
         { symbol: BENCHMARK_SYMBOL },
       ],
     },
@@ -255,7 +256,6 @@ const syncPrices = async (req, res) => {
       });
     }
 
-    // Space the calls out so a sync reads as a person browsing, not a scraper.
     await new Promise((resolve) => setTimeout(resolve, 400));
   }
 
@@ -361,4 +361,93 @@ const syncSecurities = async (req, res) => {
   });
 };
 
-export { syncPrices, getPrices, syncSecurities };
+// Search by symbol or company name, for adding to the watchlist.
+const searchSecurities = async (req, res) => {
+  const q = String(req.query.q ?? "").trim();
+  if (q.length < 2) return res.status(400).json({ error: "q must be at least 2 characters" });
+
+  const securities = await prisma.security.findMany({
+    where: {
+      OR: [
+        { symbol: { contains: q, mode: "insensitive" } },
+        { companyName: { contains: q, mode: "insensitive" } },
+      ],
+    },
+    select: { id: true, symbol: true, companyName: true, sector: true },
+    orderBy: { symbol: "asc" },
+    take: 20,
+  });
+
+  res.status(200).json({ message: "success", data: { securities } });
+};
+
+// How far back each chart period reaches.
+const PERIOD_MONTHS = { "1W": 0.25, "1M": 1, "3M": 3, "6M": 6, "1Y": 12, "3Y": 36, "5Y": 60 };
+
+const closesSince = async (symbol, from) => {
+  const security = await prisma.security.findUnique({ where: { symbol }, select: { id: true } });
+  if (!security) return null;
+  return prisma.dailyPrice.findMany({
+    where: { securityId: security.id, tradeDate: { gte: from } },
+    orderBy: { tradeDate: "asc" },
+    select: { tradeDate: true, close: true },
+  });
+};
+
+// A stock against the benchmark over a period, both rebased to 100 on the
+// first day so a 500-rupee stock and a 176,000-point index share one axis.
+const getTrend = async (req, res) => {
+  const symbol = req.params.symbol.toUpperCase();
+  const period = String(req.query.period ?? "6M").toUpperCase();
+  const months = PERIOD_MONTHS[period];
+  if (!months) {
+    return res.status(400).json({ error: `period must be one of ${Object.keys(PERIOD_MONTHS).join(", ")}` });
+  }
+
+  const from = new Date();
+  from.setUTCHours(0, 0, 0, 0);
+  from.setUTCDate(from.getUTCDate() - Math.round(months * 30.4));
+
+  const [stock, bench] = await Promise.all([
+    closesSince(symbol, from),
+    closesSince(BENCHMARK_SYMBOL, from),
+  ]);
+  if (!stock) return res.status(404).json({ error: "security does not exist" });
+
+  const day = (bar) => bar.tradeDate.toISOString().slice(0, 10);
+  const benchByDay = new Map(bench.map((bar) => [day(bar), Number(bar.close)]));
+
+  // Only days both have a close, so the two lines always line up.
+  const shared = stock.filter((bar) => benchByDay.has(day(bar)));
+  if (shared.length < 2) {
+    return res.status(404).json({ error: "not enough price history for this period" });
+  }
+
+  const stockBase = Number(shared[0].close);
+  const benchBase = benchByDay.get(day(shared[0]));
+
+  const series = shared.map((bar) => ({
+    date: day(bar),
+    close: Number(bar.close),
+    stock: (Number(bar.close) / stockBase) * 100,
+    benchmark: (benchByDay.get(day(bar)) / benchBase) * 100,
+  }));
+
+  const last = series.at(-1);
+  res.status(200).json({
+    message: "success",
+    data: {
+      symbol,
+      period,
+      range: { from: series[0].date, to: last.date },
+      series,
+      summary: {
+        stockReturn: last.stock - 100,
+        benchmarkReturn: last.benchmark - 100,
+        outperformance: last.stock - last.benchmark,
+      },
+    },
+  });
+};
+
+export { syncPrices, getPrices, syncSecurities, searchSecurities, getTrend };

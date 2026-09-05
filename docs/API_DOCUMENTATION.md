@@ -22,6 +22,7 @@
    - [Broker accounts](#92-broker-accounts)
    - [Portfolio](#93-portfolio)
    - [Market data](#94-market-data)
+   - [Watchlist](#95-watchlist)
 10. [How the broker integration works](#10-how-the-broker-integration-works)
 11. [How positions are calculated](#11-how-positions-are-calculated)
 12. [In-memory sessions](#12-in-memory-sessions)
@@ -133,7 +134,7 @@ All variables live in `.env` (which is git-ignored — never commit it).
 Backend/
 ├── prisma/
 │   ├── schema.prisma            # Database models (source of truth for tables)
-│   └── migrations/              # SQL migration history (8 migrations)
+│   └── migrations/              # SQL migration history (9 migrations)
 ├── prisma7.config.ts            # Prisma 7 config: schema path, migrations path, DB URL
 ├── src/
 │   ├── server.js                # Entry point: creates Express app, mounts routes, handles shutdown
@@ -146,12 +147,14 @@ Backend/
 │   │   ├── authRoutes.js        # /auth/*
 │   │   ├── brokerAccountRoutes.js # /broker/*
 │   │   ├── portfolioRoutes.js   # /portfolio/*
-│   │   └── marketRoutes.js      # /market/*
+│   │   ├── marketRoutes.js      # /market/*
+│   │   └── watchlistRoutes.js   # /watchlist/*
 │   ├── controllers/
 │   │   ├── authController.js    # register, login
 │   │   ├── brokerAccountController.js # link broker, list, disconnect, sync trades
 │   │   ├── portfolioController.js # portfolio list, positions, trades
-│   │   └── marketDataController.js # daily price sync
+│   │   ├── marketDataController.js # price sync, securities import + search, trend chart
+│   │   └── watchlistController.js # watchlist list / add / remove
 │   ├── services/
 │   │   └── brokderSessionStore.js # In-memory store for broker + market cookies
 │   ├── utils/
@@ -230,7 +233,7 @@ flowchart LR
 
 ## 7. Database design (ERD)
 
-There are **7 tables**. UUIDs are used as primary keys everywhere except `daily_prices` (which uses a big auto-increment integer because it gets many rows). All money and quantity columns are `DECIMAL(18,4)` so there are no floating-point rounding problems.
+There are **8 tables**. UUIDs are used as primary keys everywhere except `daily_prices` (which uses a big auto-increment integer because it gets many rows). All money and quantity columns are `DECIMAL(18,4)` so there are no floating-point rounding problems.
 
 ### 7.1 Entity-relationship diagram
 
@@ -245,6 +248,8 @@ erDiagram
     securities ||--o{ trades : "traded"
     securities ||--o{ positions : "held"
     securities ||--o{ daily_prices : "priced"
+    users ||--o{ watchlist_items : "watches"
+    securities ||--o{ watchlist_items : "watched"
 
     users {
         uuid id PK
@@ -326,6 +331,13 @@ erDiagram
         bigint volume "nullable"
         timestamptz fetched_at
     }
+
+    watchlist_items {
+        uuid id PK
+        uuid user_id FK
+        uuid security_id FK
+        timestamptz created_at
+    }
 ```
 
 ### 7.2 Relationships in words
@@ -339,6 +351,7 @@ erDiagram
 | `portfolios` | `trades` | 1 → many | All trades belong to a portfolio. |
 | `portfolios` | `positions` | 1 → many | One position row per stock held in the portfolio. |
 | `securities` | `trades` / `positions` / `daily_prices` | 1 → many | A security (stock or index) is shared by everyone; it is not per-user. |
+| `users` / `securities` | `watchlist_items` | many ↔ many | A user's watchlist is a set of securities. The link row is per-user; the security itself is shared. |
 
 ### 7.3 Unique constraints and indexes
 
@@ -353,6 +366,7 @@ These matter because the sync code relies on them for "upsert" (insert-or-update
 | `trades` | `(broker_account_id, broker_trade_id)` | Prevents importing the same trade twice. Used to upsert trades during sync. |
 | `positions` | `(portfolio_id, security_id)` | One position per stock per portfolio. Used to upsert positions. |
 | `daily_prices` | `(security_id, trade_date)` | One price bar per stock per day. Lets `createMany({ skipDuplicates })` re-run safely. |
+| `watchlist_items` | `(user_id, security_id)` | A stock is on a user's watchlist at most once. `POST /watchlist/:securityId` upserts against it, so adding twice is a no-op. |
 
 | Table | Index | Purpose |
 |---|---|---|
@@ -361,6 +375,7 @@ These matter because the sync code relies on them for "upsert" (insert-or-update
 | `trades` | `(portfolio_id, executed_at DESC)` | Fast paginated trade list, newest first. |
 | `trades` | `security_id` | Fast lookup by stock. |
 | `positions` | `security_id` | Fast lookup by stock. |
+| `watchlist_items` | `user_id` | Fast "my watchlist". |
 
 ### 7.4 Table-by-table details
 
@@ -370,13 +385,15 @@ These matter because the sync code relies on them for "upsert" (insert-or-update
 
 **`portfolios`** — a bucket of trades and positions. Today a portfolio is always created automatically when a broker account is linked, and is named `AHL <client_code>`. `base_currency` is always `PKR`.
 
-**`securities`** — the master list of stocks and indexes (e.g. `FFC`, `OGDC`, `KSE100`). Rows are created on-the-fly during sync. Today `company_name` is just set to the symbol, and `isin` / `sector` stay empty.
+**`securities`** — the master list of stocks and indexes (e.g. `FFC`, `OGDC`, `KSE100`). Filled two ways: the trade sync creates a row on-the-fly for any symbol it meets (with `company_name` = symbol as a placeholder), and `POST /market/securities/:id` imports the broker's full approved list (~557 rows) with real company names and sectors, overwriting those placeholders. `isin` is never filled. Only a small subset (held, watched, `KSE100`) ever gets prices; the rest exist so the watchlist search has something to find.
 
 **`trades`** — every executed buy or sell. `raw_payload` keeps the exact JSON row the broker sent, so nothing is lost if the parsing logic changes later. `broker_trade_id` is a generated fingerprint (see [section 10.3](#103-how-trades-get-a-stable-id)). `source` is always `broker_sync` today.
 
 **`positions`** — the current holding for one stock in one portfolio: how many shares (`quantity`), what they cost on average (`avg_cost`), and profit already locked in from past sells (`realized_pnl`). Recomputed on every sync.
 
 **`daily_prices`** — one row per stock per trading day with open/high/low/close/volume. Filled two ways: the broker sync writes today's close from the broker's `mtmPrice`; the market sync writes full OHLCV history from the analytics API.
+
+**`watchlist_items`** — one row per (user, security) the user wants to follow. It holds nothing but the link and when it was added; prices come from `daily_prices` at read time. Watched securities are automatically included in the price sync scope.
 
 ---
 
@@ -431,8 +448,14 @@ Every protected endpoint filters by `req.user.id`. A user can only see or change
 | 7 | GET | `/portfolio/getPortfolioList` | 🔒 | List my portfolios |
 | 8 | GET | `/portfolio/:id/positions` | 🔒 | Current holdings with P&L and a summary |
 | 9 | GET | `/portfolio/:id/trades` | 🔒 | Paginated trade history |
-| 10 | POST | `/market/sync/:id` | 🔒 | Download ~5 years of daily prices for all securities |
+| 10 | POST | `/market/sync/:id` | 🔒 | Download ~5 years of daily prices for held + watched securities and `KSE100` |
 | 11 | GET | `/market/prices/:symbol` | 🔒 | Stored daily price bars for one symbol (e.g. `KSE100`) |
+| 12 | POST | `/market/securities/:id` | 🔒 | One-time import of the broker's full approved symbol list |
+| 13 | GET | `/market/securities?q=` | 🔒 | Search securities by symbol or company name |
+| 14 | GET | `/market/trend/:symbol?period=` | 🔒 | One stock vs `KSE100`, both rebased to 100 — chart payload |
+| 15 | GET | `/watchlist` | 🔒 | My watchlist with last price and day change; `KSE100` on top |
+| 16 | POST | `/watchlist/:securityId` | 🔒 | Add a security to my watchlist |
+| 17 | DELETE | `/watchlist/:securityId` | 🔒 | Remove a security from my watchlist |
 
 ---
 
@@ -832,7 +855,7 @@ Example: `GET /portfolio/c47b…/trades?limit=20&offset=40`
 
 #### 10. `POST /market/sync/:id` 🔒
 
-Downloads daily price history (about 5 years of open/high/low/close/volume) for **every security in the database**, plus the `KSE100` index as a benchmark. Safe to re-run: existing days are skipped, so the first run backfills and later runs only add new days.
+Downloads daily price history (about 5 years of open/high/low/close/volume) for the securities that matter: **every stock currently held** (a position with quantity > 0), **every stock on any user's watchlist**, and the `KSE100` benchmark. The other ~500 rows in `securities` exist for search only and are never fetched. Safe to re-run: a symbol whose newest stored bar is already today (Karachi date) is skipped without making a request, and for the rest `skipDuplicates` means only new days are inserted. Requests are spaced 400 ms apart, so a sync of ~20 symbols takes about 8 seconds.
 
 The `:id` is a **broker account** id, because the market API needs a session that is obtained by following that account's analytics hand-off (see [section 10.5](#105-getting-market-data-prices)). If there is no live broker session but `DASHBOARD_COOKIE` is set in `.env`, that cookie is used instead.
 
@@ -844,18 +867,20 @@ The `:id` is a **broker account** id, because the market API needs a session tha
 {
   "message": "success",
   "data": {
-    "securities": 13,
-    "newRows": 15402,
+    "securities": 20,
+    "fetched": 18,
+    "skipped": 1,
+    "newRows": 22,
     "results": [
-      { "symbol": "FFC", "fetched": 1240, "saved": 1240 },
-      { "symbol": "KSE100", "fetched": 1240, "saved": 1240 },
+      { "symbol": "FFC", "fetched": 1240, "saved": 1 },
+      { "symbol": "KSE100", "skipped": "already current" },
       { "symbol": "XYZ", "error": 404 }
     ]
   }
 }
 ```
 
-Each item in `results` is either `{ symbol, fetched, saved }` or `{ symbol, error }` where `error` is an HTTP status or message. One failing symbol does not stop the others.
+Each item in `results` is one of `{ symbol, fetched, saved }`, `{ symbol, skipped: "already current" }`, or `{ symbol, error }` where `error` is an HTTP status or message. `saved` is the count of **new** rows (the API always returns the full history, so on a re-run this is usually 0 or 1). One failing symbol does not stop the others.
 
 **Errors**
 
@@ -865,7 +890,7 @@ Each item in `results` is either `{ symbol, fetched, saved }` or `{ symbol, erro
 | 401 | `{ "error": "The broker did not return an analytics URL." }` / `"The dashboard handoff did not return a session cookie."` | Hand-off to the analytics site failed. |
 | 404 | `{ "error": "account does not exist" }` | Not found / not yours. |
 
-> This call fetches symbols one after another and can take a while (many seconds to minutes) when there are many securities. The HTTP request stays open until it finishes.
+> This call fetches symbols one after another with a 400 ms pause between them. With ~20 held + watched symbols it takes about 8 seconds; the HTTP request stays open until it finishes. The pacing is deliberate — a burst of requests against the analytics site looks like a scraper, a spaced sequence looks like someone browsing.
 
 ---
 
@@ -908,6 +933,193 @@ Bars are oldest first. `open`, `high`, `low`, `volume` can be `null` for the pla
 |---|---|---|
 | 400 | same four messages as the positions endpoint | Bad `from`/`to`. |
 | 404 | `{ "error": "security does not exist" }` | Symbol never seen by any sync. |
+
+---
+
+#### 12. `POST /market/securities/:id` 🔒
+
+One-time import of the broker's complete symbol list (from `GET /Home/GetSymolsList` — the broker's own typo). Run it once after linking an account; it fills `securities` with every approved symbol on the exchange so the watchlist search has something to find. Re-running is safe: it upserts by `symbol`, refreshing names and sectors, and the placeholder rows the trade sync created (`company_name` = symbol) get their real company names.
+
+The `:id` is a **broker account** id; the call needs that account's live broker session (the 15 minutes after `POST /broker/accounts`). It talks to the broker site, not the analytics site.
+
+**What is kept:** rows with `approved: "Approved"`, excluding `market: "FUT"` (futures contracts such as `AGHA-OCT`). The source lists each symbol 2–3 times (REG / ODL / FUT markets); one row per symbol is stored. An empty `sectorName` becomes `null`. Company names keep the broker's suffixes — `(XD)` ex-dividend, `(DEF)` defaulter segment — as they were sent.
+
+**Path params:** `id` — broker account UUID.
+
+**Success — `200 OK`**
+
+```json
+{ "message": "success", "data": { "received": 1644, "saved": 557 } }
+```
+
+`received` is the raw row count from the broker; `saved` is the number of distinct symbols written.
+
+**Errors**
+
+| Status | Body | When |
+|---|---|---|
+| 401 | `{ "error": "Broker session expired. Reconnect the account." }` | No live broker session. |
+| 404 | `{ "error": "account does not exist" }` | Not found / not yours. |
+
+> Upserts one symbol at a time; expect a few seconds for ~550 rows.
+
+---
+
+#### 13. `GET /market/securities?q=` 🔒
+
+Search `securities` by symbol or company name, case-insensitive — the picker for "add to watchlist". Reads the database only; no broker or market session needed.
+
+**Query params**
+
+| Param | Required | Notes |
+|---|---|---|
+| `q` | yes | At least 2 characters. Matched with `contains` against both `symbol` and `companyName`. |
+
+Returns at most 20 rows, ordered by symbol.
+
+Example: `GET /market/securities?q=fert` → `EFERT`, `FATIMA`, `FFBL`, `FFC`.
+
+**Success — `200 OK`**
+
+```json
+{
+  "message": "success",
+  "data": {
+    "securities": [
+      { "id": "…", "symbol": "EFERT", "companyName": "Engro Fertilizers Limited", "sector": "FERTILIZER" },
+      { "id": "…", "symbol": "FFC", "companyName": "Fauji Fertilizer Company Limited", "sector": "FERTILIZER" }
+    ]
+  }
+}
+```
+
+Pass `id` to `POST /watchlist/:securityId`.
+
+**Errors**
+
+| Status | Body | When |
+|---|---|---|
+| 400 | `{ "error": "q must be at least 2 characters" }` | Missing or too-short `q`. |
+
+---
+
+#### 14. `GET /market/trend/:symbol?period=` 🔒
+
+One stock against the `KSE100` benchmark over a period — the payload for a two-line comparison chart. Both series are **rebased to 100 on the first day** of the range, so a 550-rupee stock and a 176,000-point index share one axis, and the gap between the two lines reads directly as out- or under-performance in percentage points. Reads `daily_prices` only.
+
+**Path params:** `symbol` — stock symbol, case-insensitive.
+
+**Query params**
+
+| Param | Default | Values |
+|---|---|---|
+| `period` | `6M` | `1W`, `1M`, `3M`, `6M`, `1Y`, `3Y`, `5Y` |
+
+The period is a calendar window ending today, then reduced to the trading days that **both** the stock and the index have a close for — so the two lines always line up. A `6M` request returns ~120 points, `1W` about 5. If the stock listed after the window began (e.g. `BFAGRO`, March 2025), the range is clamped to the stock's first bar; `range.from` in the response says where the line really starts.
+
+`1D` is **not supported**. A daily-bars table gives one point per day; an intraday chart needs the minute feed (`/intraday/<SYMBOL>/1D` on the analytics API), which is not stored.
+
+Example: `GET /market/trend/FFC?period=6M`
+
+**Success — `200 OK`**
+
+```json
+{
+  "message": "success",
+  "data": {
+    "symbol": "FFC",
+    "period": "6M",
+    "range": { "from": "2026-03-09", "to": "2026-09-04" },
+    "series": [
+      { "date": "2026-03-09", "close": 471.4,  "stock": 100,    "benchmark": 100 },
+      { "date": "2026-09-04", "close": 548.11, "stock": 116.27, "benchmark": 119.69 }
+    ],
+    "summary": { "stockReturn": 16.27, "benchmarkReturn": 19.69, "outperformance": -3.42 }
+  }
+}
+```
+
+Chart `stock` and `benchmark`; show `close` in the tooltip (the real price); put `summary` in the header. `outperformance` is `stockReturn − benchmarkReturn` in percentage points — negative means the stock trailed the index over the window.
+
+**Errors**
+
+| Status | Body | When |
+|---|---|---|
+| 400 | `{ "error": "period must be one of 1W, 1M, 3M, 6M, 1Y, 3Y, 5Y" }` | Unknown period. |
+| 404 | `{ "error": "security does not exist" }` | Unknown symbol. |
+| 404 | `{ "error": "not enough price history for this period" }` | Fewer than 2 shared trading days — usually prices were never synced for this symbol. |
+
+---
+
+### 9.5 Watchlist
+
+A per-user list of securities to follow. Items reference `securities`, so anything the search endpoint returns can be added. Watched symbols are automatically included in the price sync (endpoint 10), so they get prices on the next run.
+
+#### 15. `GET /watchlist` 🔒
+
+The user's watchlist with the latest price and the day's move for each item, plus the same figures for `KSE100` as a benchmark row to show on top. Everything comes from `daily_prices` — the last two closes per symbol — so it is as fresh as the last price sync.
+
+**Success — `200 OK`**
+
+```json
+{
+  "message": "success",
+  "data": {
+    "benchmark": {
+      "securityId": "…", "symbol": "KSE100", "companyName": "KSE-100 Index", "sector": null,
+      "lastPrice": 175328.82, "change": 399.13, "changePct": 0.23, "asOf": "2026-09-04"
+    },
+    "items": [
+      { "securityId": "…", "symbol": "MLCF", "companyName": "Maple Leaf Cement Factory Limited", "sector": "CEMENT",
+        "lastPrice": 101.46, "change": 2.40, "changePct": 2.42, "asOf": "2026-09-04" },
+      { "securityId": "…", "symbol": "FFC", "companyName": "Fauji Fertilizer Company Limited", "sector": "FERTILIZER",
+        "lastPrice": 548.11, "change": -0.57, "changePct": -0.10, "asOf": "2026-09-04" }
+    ]
+  }
+}
+```
+
+`change` = latest close − previous close; `changePct` is that over the previous close. Items are in the order they were added. Comparing an item's `changePct` with the benchmark's tells you at a glance whether it beat the market today.
+
+**Nulls the UI must handle:** a symbol added since the last price sync has no bars → `lastPrice`, `change`, `changePct`, `asOf` are all `null`. A symbol with only one bar has a `lastPrice` but `change` / `changePct` are `null`. Render "—", not 0. `benchmark` is `null` only if `KSE100` has never been synced.
+
+---
+
+#### 16. `POST /watchlist/:securityId` 🔒
+
+Add a security to the watchlist. Idempotent — adding one that is already there returns `200` and changes nothing (unique index on `(user_id, security_id)`). No request body.
+
+**Path params:** `securityId` — a `securities.id`, typically from `GET /market/securities?q=`.
+
+**Success — `200 OK`**
+
+```json
+{ "message": "success", "data": { "symbol": "FFC" } }
+```
+
+**Errors**
+
+| Status | Body | When |
+|---|---|---|
+| 404 | `{ "error": "security does not exist" }` | Unknown `securityId`. |
+
+---
+
+#### 17. `DELETE /watchlist/:securityId` 🔒
+
+Remove a security from the watchlist. Scoped to the caller — a `securityId` that is on someone else's list, or on nobody's, is a `404`.
+
+**Success — `200 OK`**
+
+```json
+{ "message": "success" }
+```
+
+**Errors**
+
+| Status | Body | When |
+|---|---|---|
+| 404 | `{ "error": "not in watchlist" }` | Not on this user's list. |
 
 ---
 
@@ -1019,6 +1231,10 @@ The analytics dashboard (`DASHBOARD_URL`) is a different website with its own lo
 Dates from the API have no timezone; the backend takes the `YYYY-MM-DD` part as written so the day does not shift.
 
 If the market API answers `401` mid-run, the cached cookie is thrown away so the next call re-does the hand-off.
+
+**Scope and pacing.** The sync only fetches securities that are held, on a watchlist, or the benchmark. The `securities` table carries the whole exchange (~557 rows) for search, and fetching five years for every row would be hundreds of calls for data nobody views. A symbol whose newest stored bar is already today (Karachi date) is skipped without a request. Calls are spaced 400 ms apart so a sync reads as a person browsing rather than a scraper.
+
+**Securities import.** The full symbol list comes from a different endpoint on the **broker** site, `GET /Home/GetSymolsList`, using the broker session rather than the analytics one. It is a one-time import — see endpoint 12.
 
 ---
 
@@ -1132,11 +1348,11 @@ These are facts about the code as it is today. They are listed so nobody is surp
 6. No global Express error handler → unexpected errors return HTML, not JSON.
 7. `PATCH …/disconnect` does not clear the in-memory broker session, so `sync` keeps working for up to 15 minutes after "disconnect".
 8. Broker sessions live only in memory (see section 12): lost on restart, not shared across instances.
-9. `POST /market/sync/:id` processes symbols one at a time inside a single HTTP request. With many securities it is slow and could hit client timeouts. A background job would be better.
+9. `POST /market/sync/:id` processes symbols one at a time inside a single HTTP request. It is now scoped to held + watched symbols (~20) with a 400 ms pause, so about 8 seconds — acceptable, but a background job would still be better if the watchlist grows large.
 
 **Data quality**
 
-10. `securities.company_name` is set to the symbol as a placeholder; `isin` and `sector` are never filled.
+10. ~~`securities.company_name` is set to the symbol as a placeholder; `isin` and `sector` are never filled.~~ Mostly fixed: `POST /market/securities/:id` fills real names and sectors from the broker's list. `isin` is still never filled, and names keep the broker's `(XD)` / `(DEF)` suffixes, which change over time.
 11. `trades.taxes_levies` is always 0; all charges are lumped into `commission`.
 12. Trade `executed_at` only has the date (UTC midnight); the broker does not give a time.
 13. The trade fingerprint (section 10.3) depends on the broker's row values. If the broker later changes any value or the date format for old rows, those trades would be imported again as "new".
@@ -1148,6 +1364,9 @@ These are facts about the code as it is today. They are listed so nobody is surp
 16. Response shapes are not fully consistent (`message` vs `status`, `error` vs `message`, `token` location). See section 13.
 17. `GET /portfolio/:id/positions` and `/trades` return an empty list (200) for a portfolio that is not yours, instead of 404.
 18. The env variable is named `JWR_EXPIRES_IN` (typo). Renaming it means changing both `.env` and `generateToken.js`.
+19. `GET /market/trend/:symbol` has no `1D` period. Intraday charts need the minute feed (`/intraday/<SYMBOL>/1D` on the analytics API), which is not stored — `daily_prices` is one row per day.
+20. `GET /watchlist` gives only the day's change per row. There is no sparkline (mini 30-day line) per item; it would be a cheap addition if the UI wants one.
+21. Period windows in `GET /market/trend` are calendar-based (`6M` ≈ 183 days back), so the point count varies with holidays and listing dates rather than being fixed.
 
 ---
 

@@ -7,18 +7,59 @@
   "auth": {
     "type": "bearer",
     "bearer": [
-      { "key": "token", "value": "{{token}}", "type": "string" }
+      {
+        "key": "token",
+        "value": "{{token}}",
+        "type": "string"
+      }
     ]
   },
   "variable": [
-    { "key": "baseUrl", "value": "http://localhost:5001", "type": "string" },
-    { "key": "token", "value": "", "type": "string" },
-    { "key": "brokerAccountId", "value": "", "type": "string" },
-    { "key": "portfolioId", "value": "", "type": "string" },
-    { "key": "email", "value": "ali@example.com", "type": "string" },
-    { "key": "password", "value": "secret123", "type": "string" },
-    { "key": "brokerAccountNumber", "value": "CC12345", "type": "string" },
-    { "key": "brokerPassword", "value": "", "type": "string" }
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:5001",
+      "type": "string"
+    },
+    {
+      "key": "token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "brokerAccountId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "portfolioId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "email",
+      "value": "ali@example.com",
+      "type": "string"
+    },
+    {
+      "key": "password",
+      "value": "secret123",
+      "type": "string"
+    },
+    {
+      "key": "brokerAccountNumber",
+      "value": "CC12345",
+      "type": "string"
+    },
+    {
+      "key": "brokerPassword",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "securityId",
+      "value": "",
+      "type": "string"
+    }
   ],
   "item": [
     {
@@ -28,20 +69,34 @@
         {
           "name": "Register",
           "request": {
-            "auth": { "type": "noauth" },
+            "auth": {
+              "type": "noauth"
+            },
             "method": "POST",
             "header": [
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\",\n  \"fullName\": \"Ali Khan\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": {
               "raw": "{{baseUrl}}/auth/register",
-              "host": ["{{baseUrl}}"],
-              "path": ["auth", "register"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "register"
+              ]
             },
             "description": "Creates a user and returns a login token.\n\n**Responses**\n- `201` `{ message: \"success\", data: { id, fullName }, token }`\n- `400` `{ message: \"user already exists\" }`\n- `500` HTML page if a required field is missing (no validation yet)."
           },
@@ -66,28 +121,72 @@
               "name": "201 Created",
               "originalRequest": {
                 "method": "POST",
-                "header": [{ "key": "Content-Type", "value": "application/json" }],
-                "body": { "mode": "raw", "raw": "{\n  \"email\": \"ali@example.com\",\n  \"password\": \"secret123\",\n  \"fullName\": \"Ali Khan\"\n}" },
-                "url": { "raw": "{{baseUrl}}/auth/register", "host": ["{{baseUrl}}"], "path": ["auth", "register"] }
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"email\": \"ali@example.com\",\n  \"password\": \"secret123\",\n  \"fullName\": \"Ali Khan\"\n}"
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/auth/register",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "auth",
+                    "register"
+                  ]
+                }
               },
               "status": "Created",
               "code": 201,
               "_postman_previewlanguage": "json",
-              "header": [{ "key": "Content-Type", "value": "application/json; charset=utf-8" }],
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
               "body": "{\n  \"message\": \"success\",\n  \"data\": { \"id\": \"3f1c…\", \"fullName\": \"Ali Khan\" },\n  \"token\": \"eyJhbGciOi…\"\n}"
             },
             {
               "name": "400 user already exists",
               "originalRequest": {
                 "method": "POST",
-                "header": [{ "key": "Content-Type", "value": "application/json" }],
-                "body": { "mode": "raw", "raw": "{\n  \"email\": \"ali@example.com\",\n  \"password\": \"secret123\",\n  \"fullName\": \"Ali Khan\"\n}" },
-                "url": { "raw": "{{baseUrl}}/auth/register", "host": ["{{baseUrl}}"], "path": ["auth", "register"] }
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"email\": \"ali@example.com\",\n  \"password\": \"secret123\",\n  \"fullName\": \"Ali Khan\"\n}"
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/auth/register",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "auth",
+                    "register"
+                  ]
+                }
               },
               "status": "Bad Request",
               "code": 400,
               "_postman_previewlanguage": "json",
-              "header": [{ "key": "Content-Type", "value": "application/json; charset=utf-8" }],
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
               "body": "{ \"message\": \"user already exists\" }"
             }
           ]
@@ -95,20 +194,34 @@
         {
           "name": "Login",
           "request": {
-            "auth": { "type": "noauth" },
+            "auth": {
+              "type": "noauth"
+            },
             "method": "POST",
             "header": [
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": {
               "raw": "{{baseUrl}}/auth/login",
-              "host": ["{{baseUrl}}"],
-              "path": ["auth", "login"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
             },
             "description": "Logs in and returns a JWT (valid 7 days by default).\n\n**Responses**\n- `200` `{ status: \"success\", data: { user: { id, fullName, email }, token } }`\n- `401` `{ message: \"Invalid email or passowrd\" }` — same message for unknown email and wrong password."
           },
@@ -134,28 +247,72 @@
               "name": "200 OK",
               "originalRequest": {
                 "method": "POST",
-                "header": [{ "key": "Content-Type", "value": "application/json" }],
-                "body": { "mode": "raw", "raw": "{\n  \"email\": \"ali@example.com\",\n  \"password\": \"secret123\"\n}" },
-                "url": { "raw": "{{baseUrl}}/auth/login", "host": ["{{baseUrl}}"], "path": ["auth", "login"] }
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"email\": \"ali@example.com\",\n  \"password\": \"secret123\"\n}"
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/auth/login",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "auth",
+                    "login"
+                  ]
+                }
               },
               "status": "OK",
               "code": 200,
               "_postman_previewlanguage": "json",
-              "header": [{ "key": "Content-Type", "value": "application/json; charset=utf-8" }],
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
               "body": "{\n  \"status\": \"success\",\n  \"data\": {\n    \"user\": { \"id\": \"3f1c…\", \"fullName\": \"Ali Khan\", \"email\": \"ali@example.com\" },\n    \"token\": \"eyJhbGciOi…\"\n  }\n}"
             },
             {
               "name": "401 Invalid credentials",
               "originalRequest": {
                 "method": "POST",
-                "header": [{ "key": "Content-Type", "value": "application/json" }],
-                "body": { "mode": "raw", "raw": "{\n  \"email\": \"ali@example.com\",\n  \"password\": \"wrong\"\n}" },
-                "url": { "raw": "{{baseUrl}}/auth/login", "host": ["{{baseUrl}}"], "path": ["auth", "login"] }
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"email\": \"ali@example.com\",\n  \"password\": \"wrong\"\n}"
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/auth/login",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "auth",
+                    "login"
+                  ]
+                }
               },
               "status": "Unauthorized",
               "code": 401,
               "_postman_previewlanguage": "json",
-              "header": [{ "key": "Content-Type", "value": "application/json; charset=utf-8" }],
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
               "body": "{ \"message\": \"Invalid email or passowrd\" }"
             }
           ]
@@ -171,17 +328,29 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"accountNumber\": \"{{brokerAccountNumber}}\",\n  \"password\": \"{{brokerPassword}}\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": {
               "raw": "{{baseUrl}}/broker/accounts",
-              "host": ["{{baseUrl}}"],
-              "path": ["broker", "accounts"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "broker",
+                "accounts"
+              ]
             },
             "description": "Logs in to the AHL eTrade website with the broker credentials, creates (or re-activates) the `broker_accounts` row and its portfolio (`AHL <accountNumber>`), and keeps the broker cookies in server memory for **15 minutes**. The broker password is never stored.\n\nThe test script saves `brokerAccountId` and `portfolioId` into collection variables.\n\n**Responses**\n- `200` `{ data: { brokerAccountId, portfolioId, status, sessionCookie, cookies, enabledDigits } }`\n- `400` `{ error: \"accountNumber and password are required.\" }`\n- `400` `{ error: \"Password is too short: the broker asked for character N.\" }`\n- `401` `{ error: \"Invalid broker credentials.\" }`\n- `502` `{ error: \"No session cookie was returned by the broker login page.\" }`\n- `502` `{ error: \"No enabled Digit fields were found in the broker login page.\" }`"
           },
@@ -207,28 +376,72 @@
               "name": "200 OK",
               "originalRequest": {
                 "method": "POST",
-                "header": [{ "key": "Content-Type", "value": "application/json" }],
-                "body": { "mode": "raw", "raw": "{\n  \"accountNumber\": \"CC12345\",\n  \"password\": \"MyBrokerPass1\"\n}" },
-                "url": { "raw": "{{baseUrl}}/broker/accounts", "host": ["{{baseUrl}}"], "path": ["broker", "accounts"] }
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"accountNumber\": \"CC12345\",\n  \"password\": \"MyBrokerPass1\"\n}"
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/broker/accounts",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "broker",
+                    "accounts"
+                  ]
+                }
               },
               "status": "OK",
               "code": 200,
               "_postman_previewlanguage": "json",
-              "header": [{ "key": "Content-Type", "value": "application/json; charset=utf-8" }],
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
               "body": "{\n  \"data\": {\n    \"brokerAccountId\": \"8a2e…\",\n    \"portfolioId\": \"c47b…\",\n    \"status\": 302,\n    \"sessionCookie\": \".AspNetCore.Session=CfDJ8…\",\n    \"cookies\": { \".AspNetCore.Session\": \"CfDJ8…\", \"trader\": \"CC12345\", \"HouseName\": \"AHL\" },\n    \"enabledDigits\": [1, 4, 7]\n  }\n}"
             },
             {
               "name": "401 Invalid broker credentials",
               "originalRequest": {
                 "method": "POST",
-                "header": [{ "key": "Content-Type", "value": "application/json" }],
-                "body": { "mode": "raw", "raw": "{\n  \"accountNumber\": \"CC12345\",\n  \"password\": \"wrong\"\n}" },
-                "url": { "raw": "{{baseUrl}}/broker/accounts", "host": ["{{baseUrl}}"], "path": ["broker", "accounts"] }
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"accountNumber\": \"CC12345\",\n  \"password\": \"wrong\"\n}"
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/broker/accounts",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "broker",
+                    "accounts"
+                  ]
+                }
               },
               "status": "Unauthorized",
               "code": 401,
               "_postman_previewlanguage": "json",
-              "header": [{ "key": "Content-Type", "value": "application/json; charset=utf-8" }],
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
               "body": "{ \"error\": \"Invalid broker credentials.\" }"
             }
           ]
@@ -240,8 +453,13 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/broker/accounts",
-              "host": ["{{baseUrl}}"],
-              "path": ["broker", "accounts"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "broker",
+                "accounts"
+              ]
             },
             "description": "Lists the caller's linked broker accounts, newest first, each with its portfolio.\n\n`syncStatus` is `idle` or `disconnected`; `lastSyncedAt` is `null` until the first sync.\n\nIf `brokerAccountId` / `portfolioId` are still empty, the test script fills them from the first account."
           },
@@ -270,12 +488,26 @@
               "originalRequest": {
                 "method": "GET",
                 "header": [],
-                "url": { "raw": "{{baseUrl}}/broker/accounts", "host": ["{{baseUrl}}"], "path": ["broker", "accounts"] }
+                "url": {
+                  "raw": "{{baseUrl}}/broker/accounts",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "broker",
+                    "accounts"
+                  ]
+                }
               },
               "status": "OK",
               "code": 200,
               "_postman_previewlanguage": "json",
-              "header": [{ "key": "Content-Type", "value": "application/json; charset=utf-8" }],
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
               "body": "{\n  \"message\": \"success\",\n  \"data\": {\n    \"accounts\": [\n      {\n        \"id\": \"8a2e…\",\n        \"broker\": \"AHL_ETRADE\",\n        \"clientCode\": \"CC12345\",\n        \"syncStatus\": \"idle\",\n        \"lastSyncedAt\": \"2026-09-04T09:15:22.000Z\",\n        \"createdAt\": \"2026-08-30T12:00:00.000Z\",\n        \"portfolios\": [ { \"id\": \"c47b…\", \"name\": \"AHL CC12345\" } ]\n      }\n    ]\n  }\n}"
             }
           ]
@@ -287,13 +519,40 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/broker/accounts/{{brokerAccountId}}/sync",
-              "host": ["{{baseUrl}}"],
-              "path": ["broker", "accounts", "{{brokerAccountId}}", "sync"],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "broker",
+                "accounts",
+                "{{brokerAccountId}}",
+                "sync"
+              ],
               "query": [
-                { "key": "from", "value": "2022-01-01", "description": "Start date YYYY-MM-DD (default 2022-01-01)", "disabled": true },
-                { "key": "to", "value": "2026-09-04", "description": "End date YYYY-MM-DD (default today)", "disabled": true },
-                { "key": "type", "value": "ALL", "description": "Passed to the broker: BUY, SELL or ALL (default ALL)", "disabled": true },
-                { "key": "scrip", "value": "ALL", "description": "Passed to the broker: one symbol or ALL (default ALL)", "disabled": true }
+                {
+                  "key": "from",
+                  "value": "2022-01-01",
+                  "description": "Start date YYYY-MM-DD (default 2022-01-01)",
+                  "disabled": true
+                },
+                {
+                  "key": "to",
+                  "value": "2026-09-04",
+                  "description": "End date YYYY-MM-DD (default today)",
+                  "disabled": true
+                },
+                {
+                  "key": "type",
+                  "value": "ALL",
+                  "description": "Passed to the broker: BUY, SELL or ALL (default ALL)",
+                  "disabled": true
+                },
+                {
+                  "key": "scrip",
+                  "value": "ALL",
+                  "description": "Passed to the broker: one symbol or ALL (default ALL)",
+                  "disabled": true
+                }
               ]
             },
             "description": "Downloads the broker's order history and current holdings, upserts securities and trades, recomputes positions (average-cost method, merged with the broker's holdings) and records today's price for each held stock.\n\nDoes **not** log in — it reuses the in-memory session from *Link broker account*. Run it within 15 minutes of linking, otherwise you get `401` and must link again. Safe to re-run: trades are not duplicated.\n\nAll query params are optional; enable them in the Params tab to override the defaults.\n\n**Responses**\n- `200` `{ message: \"success\", data: { securities, trades, positions, prices, fromCollaterals, fromTrades, mismatches[], from, to } }`\n- `401` `{ error: \"Broker session expired. Reconnect the account to continue.\" }`\n- `404` `{ error: \"account does not exist\" }`"
@@ -317,12 +576,28 @@
               "originalRequest": {
                 "method": "POST",
                 "header": [],
-                "url": { "raw": "{{baseUrl}}/broker/accounts/{{brokerAccountId}}/sync", "host": ["{{baseUrl}}"], "path": ["broker", "accounts", "{{brokerAccountId}}", "sync"] }
+                "url": {
+                  "raw": "{{baseUrl}}/broker/accounts/{{brokerAccountId}}/sync",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "broker",
+                    "accounts",
+                    "{{brokerAccountId}}",
+                    "sync"
+                  ]
+                }
               },
               "status": "OK",
               "code": 200,
               "_postman_previewlanguage": "json",
-              "header": [{ "key": "Content-Type", "value": "application/json; charset=utf-8" }],
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
               "body": "{\n  \"message\": \"success\",\n  \"data\": {\n    \"securities\": 12,\n    \"trades\": 87,\n    \"positions\": 9,\n    \"prices\": 7,\n    \"fromCollaterals\": 7,\n    \"fromTrades\": 2,\n    \"mismatches\": [\n      {\n        \"symbol\": \"FFC\",\n        \"computedQty\": 500,\n        \"brokerQty\": 550,\n        \"delta\": 50,\n        \"impliedRatio\": 1.1,\n        \"costBasisMatches\": true\n      }\n    ],\n    \"from\": \"2022-01-01\",\n    \"to\": \"2026-09-04\"\n  }\n}"
             },
             {
@@ -330,12 +605,28 @@
               "originalRequest": {
                 "method": "POST",
                 "header": [],
-                "url": { "raw": "{{baseUrl}}/broker/accounts/{{brokerAccountId}}/sync", "host": ["{{baseUrl}}"], "path": ["broker", "accounts", "{{brokerAccountId}}", "sync"] }
+                "url": {
+                  "raw": "{{baseUrl}}/broker/accounts/{{brokerAccountId}}/sync",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "broker",
+                    "accounts",
+                    "{{brokerAccountId}}",
+                    "sync"
+                  ]
+                }
               },
               "status": "Unauthorized",
               "code": 401,
               "_postman_previewlanguage": "json",
-              "header": [{ "key": "Content-Type", "value": "application/json; charset=utf-8" }],
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
               "body": "{ \"error\": \"Broker session expired. Reconnect the account to continue.\" }"
             }
           ]
@@ -347,8 +638,15 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/broker/accounts/{{brokerAccountId}}/disconnect",
-              "host": ["{{baseUrl}}"],
-              "path": ["broker", "accounts", "{{brokerAccountId}}", "disconnect"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "broker",
+                "accounts",
+                "{{brokerAccountId}}",
+                "disconnect"
+              ]
             },
             "description": "Unlinks the broker account: sets `syncStatus` to `disconnected`. Trades, positions and the portfolio are **kept**.\n\n**Responses**\n- `200` `{ message: \"account disconnected successfully\", data: { account: { id, clientCode, syncStatus } } }`\n- `404` `{ error: \"account does not exist\" }` — not found or belongs to another user."
           },
@@ -370,12 +668,28 @@
               "originalRequest": {
                 "method": "PATCH",
                 "header": [],
-                "url": { "raw": "{{baseUrl}}/broker/accounts/{{brokerAccountId}}/disconnect", "host": ["{{baseUrl}}"], "path": ["broker", "accounts", "{{brokerAccountId}}", "disconnect"] }
+                "url": {
+                  "raw": "{{baseUrl}}/broker/accounts/{{brokerAccountId}}/disconnect",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "broker",
+                    "accounts",
+                    "{{brokerAccountId}}",
+                    "disconnect"
+                  ]
+                }
               },
               "status": "OK",
               "code": 200,
               "_postman_previewlanguage": "json",
-              "header": [{ "key": "Content-Type", "value": "application/json; charset=utf-8" }],
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
               "body": "{\n  \"message\": \"account disconnected successfully\",\n  \"data\": { \"account\": { \"id\": \"8a2e…\", \"clientCode\": \"CC12345\", \"syncStatus\": \"disconnected\" } }\n}"
             }
           ]
@@ -393,8 +707,13 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/portfolio/getPortfolioList",
-              "host": ["{{baseUrl}}"],
-              "path": ["portfolio", "getPortfolioList"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "portfolio",
+                "getPortfolioList"
+              ]
             },
             "description": "Lists the caller's portfolios. One portfolio is created automatically per linked broker account, named `AHL <clientCode>`, base currency `PKR`.\n\nIf `portfolioId` is still empty, the test script fills it from the first portfolio."
           },
@@ -420,12 +739,26 @@
               "originalRequest": {
                 "method": "GET",
                 "header": [],
-                "url": { "raw": "{{baseUrl}}/portfolio/getPortfolioList", "host": ["{{baseUrl}}"], "path": ["portfolio", "getPortfolioList"] }
+                "url": {
+                  "raw": "{{baseUrl}}/portfolio/getPortfolioList",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "portfolio",
+                    "getPortfolioList"
+                  ]
+                }
               },
               "status": "OK",
               "code": 200,
               "_postman_previewlanguage": "json",
-              "header": [{ "key": "Content-Type", "value": "application/json; charset=utf-8" }],
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
               "body": "{\n  \"message\": \"success\",\n  \"data\": {\n    \"portfoliolist\": [\n      {\n        \"id\": \"c47b…\",\n        \"userId\": \"3f1c…\",\n        \"brokerAccountId\": \"8a2e…\",\n        \"name\": \"AHL CC12345\",\n        \"baseCurrency\": \"PKR\",\n        \"createdAt\": \"2026-08-30T12:00:00.000Z\"\n      }\n    ]\n  }\n}"
             }
           ]
@@ -437,11 +770,27 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/portfolio/{{portfolioId}}/positions",
-              "host": ["{{baseUrl}}"],
-              "path": ["portfolio", "{{portfolioId}}", "positions"],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "portfolio",
+                "{{portfolioId}}",
+                "positions"
+              ],
               "query": [
-                { "key": "from", "value": "2025-09-05", "description": "YYYY-MM-DD — enable together with `to` to get a `trend` array per position", "disabled": true },
-                { "key": "to", "value": "2026-09-05", "description": "YYYY-MM-DD — inclusive; window max 5 years", "disabled": true }
+                {
+                  "key": "from",
+                  "value": "2025-09-05",
+                  "description": "YYYY-MM-DD — enable together with `to` to get a `trend` array per position",
+                  "disabled": true
+                },
+                {
+                  "key": "to",
+                  "value": "2026-09-05",
+                  "description": "YYYY-MM-DD — inclusive; window max 5 years",
+                  "disabled": true
+                }
               ]
             },
             "description": "Current holdings with the latest known price and P&L, plus a summary. All numbers are real JSON numbers.\n\n- `lastPrice` / `marketValue` / `unrealizedPnl` are `null` when no price is stored yet for that stock.\n- `summary` totals cover **only priced positions**; `unpricedPositions` says how many were left out.\n- A portfolio that is not yours returns an empty `positions` array (200, not 404).\n\n**Trend:** every position carries `trend: [ { date, close }, … ]` (oldest first) for the window in `data.range`. The default window is the last 12 months ending today; enable both `from` and `to` in the Params tab to change it. A stock with no bars in the window gets `trend: []` but keeps its `lastPrice`.\n\n**Which stocks:** only those held at some point inside the window (quantity above zero at `from`, or a BUY inside it). A stock bought after `to`, or fully sold before `from`, is left out; `summary` totals only the rows returned.\n\n**400** when only one date is sent, a date is not `YYYY-MM-DD`, `from` is after `to`, or the window is wider than 5 years."
@@ -468,12 +817,27 @@
               "originalRequest": {
                 "method": "GET",
                 "header": [],
-                "url": { "raw": "{{baseUrl}}/portfolio/{{portfolioId}}/positions", "host": ["{{baseUrl}}"], "path": ["portfolio", "{{portfolioId}}", "positions"] }
+                "url": {
+                  "raw": "{{baseUrl}}/portfolio/{{portfolioId}}/positions",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "portfolio",
+                    "{{portfolioId}}",
+                    "positions"
+                  ]
+                }
               },
               "status": "OK",
               "code": 200,
               "_postman_previewlanguage": "json",
-              "header": [{ "key": "Content-Type", "value": "application/json; charset=utf-8" }],
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
               "body": "{\n  \"message\": \"success\",\n  \"data\": {\n    \"positions\": [\n      {\n        \"id\": \"d1a0…\",\n        \"portfolioId\": \"c47b…\",\n        \"symbol\": \"FFC\",\n        \"companyName\": \"FFC\",\n        \"quantity\": 550,\n        \"avgCost\": 102.5,\n        \"lastPrice\": 118.4,\n        \"priceAsOf\": \"2026-09-04\",\n        \"investedValue\": 56375,\n        \"marketValue\": 65120,\n        \"unrealizedPnl\": 8745,\n        \"unrealizedPct\": 15.51,\n        \"realizedPnl\": 1200\n      }\n    ],\n    \"summary\": {\n      \"invested\": 56375,\n      \"marketValue\": 65120,\n      \"unrealizedPnl\": 8745,\n      \"unrealizedPct\": 15.51,\n      \"realizedPnl\": 1200,\n      \"openPositions\": 1,\n      \"pricedPositions\": 1,\n      \"unpricedPositions\": 0\n    }\n  }\n}"
             }
           ]
@@ -485,11 +849,25 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/portfolio/{{portfolioId}}/trades?limit=50&offset=0",
-              "host": ["{{baseUrl}}"],
-              "path": ["portfolio", "{{portfolioId}}", "trades"],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "portfolio",
+                "{{portfolioId}}",
+                "trades"
+              ],
               "query": [
-                { "key": "limit", "value": "50", "description": "Page size (default 50, max 100)" },
-                { "key": "offset", "value": "0", "description": "Rows to skip (default 0)" }
+                {
+                  "key": "limit",
+                  "value": "50",
+                  "description": "Page size (default 50, max 100)"
+                },
+                {
+                  "key": "offset",
+                  "value": "0",
+                  "description": "Rows to skip (default 0)"
+                }
               ]
             },
             "description": "Trade history, newest first, with pagination.\n\nNote: `quantity`, `price`, `commission` and `netAmount` come back as **strings** (Prisma Decimal) — convert with `Number()` on the client."
@@ -516,12 +894,37 @@
               "originalRequest": {
                 "method": "GET",
                 "header": [],
-                "url": { "raw": "{{baseUrl}}/portfolio/{{portfolioId}}/trades?limit=20&offset=40", "host": ["{{baseUrl}}"], "path": ["portfolio", "{{portfolioId}}", "trades"], "query": [{ "key": "limit", "value": "20" }, { "key": "offset", "value": "40" }] }
+                "url": {
+                  "raw": "{{baseUrl}}/portfolio/{{portfolioId}}/trades?limit=20&offset=40",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "portfolio",
+                    "{{portfolioId}}",
+                    "trades"
+                  ],
+                  "query": [
+                    {
+                      "key": "limit",
+                      "value": "20"
+                    },
+                    {
+                      "key": "offset",
+                      "value": "40"
+                    }
+                  ]
+                }
               },
               "status": "OK",
               "code": 200,
               "_postman_previewlanguage": "json",
-              "header": [{ "key": "Content-Type", "value": "application/json; charset=utf-8" }],
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
               "body": "{\n  \"message\": \"success\",\n  \"data\": {\n    \"trades\": [\n      {\n        \"id\": \"e9f3…\",\n        \"portfolioId\": \"c47b…\",\n        \"side\": \"BUY\",\n        \"quantity\": \"500.0000\",\n        \"price\": \"102.5000\",\n        \"commission\": \"153.7500\",\n        \"netAmount\": \"51403.7500\",\n        \"executedAt\": \"2026-03-12T00:00:00.000Z\",\n        \"security\": { \"symbol\": \"FFC\", \"companyName\": \"FFC\" }\n      }\n    ],\n    \"pagination\": { \"total\": 87, \"limit\": 20, \"offset\": 40, \"hasMore\": true }\n  }\n}"
             }
           ]
@@ -539,10 +942,16 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/market/sync/{{brokerAccountId}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["market", "sync", "{{brokerAccountId}}"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "market",
+                "sync",
+                "{{brokerAccountId}}"
+              ]
             },
-            "description": "Downloads ~5 years of daily OHLCV bars for **every security in the database** plus the `KSE100` index. Safe to re-run — existing days are skipped.\n\nThe id is a **broker account** id: the market session is obtained by following that account's analytics hand-off, so a live broker session (linked within the last 15 minutes) is needed — or `DASHBOARD_COOKIE` set in `.env` as a fallback.\n\nSymbols are fetched one after another; with many securities this request can take a while. Raise the Postman request timeout if needed (Settings → General → Request timeout).\n\n**Responses**\n- `200` `{ message: \"success\", data: { securities, newRows, results: [ { symbol, fetched, saved } | { symbol, error } ] } }`\n- `401` `{ error: \"Broker session expired. Reconnect the account so a market session can be issued.\" }`\n- `401` `{ error: \"The broker did not return an analytics URL.\" }` / `\"The dashboard handoff did not return a session cookie.\"`\n- `404` `{ error: \"account does not exist\" }`"
+            "description": "Downloads ~5 years of daily OHLCV bars for the securities that matter — every stock currently **held**, every stock on a **watchlist**, and the `KSE100` benchmark — and inserts only the days not already stored. The other ~500 rows in `securities` exist for search and are never fetched.\n\nA symbol whose newest bar is already today (Karachi date) is skipped without a request. Calls are spaced 400 ms apart, so ~20 symbols take about 8 seconds. Safe to re-run any time.\n\nNeeds a live broker session (`Link broker account` within the last 15 minutes) so the analytics hand-off can mint a market cookie.\n\n**Responses**\n- `200` `{ data: { securities, fetched, skipped, newRows, results: [ { symbol, fetched, saved } | { symbol, skipped } | { symbol, error } ] } }`\n- `401` `{ error: \"Broker session expired. Reconnect the account so a market session can be issued.\" }`\n- `404` `{ error: \"account does not exist\" }`"
           },
           "event": [
             {
@@ -563,12 +972,27 @@
               "originalRequest": {
                 "method": "POST",
                 "header": [],
-                "url": { "raw": "{{baseUrl}}/market/sync/{{brokerAccountId}}", "host": ["{{baseUrl}}"], "path": ["market", "sync", "{{brokerAccountId}}"] }
+                "url": {
+                  "raw": "{{baseUrl}}/market/sync/{{brokerAccountId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "market",
+                    "sync",
+                    "{{brokerAccountId}}"
+                  ]
+                }
               },
               "status": "OK",
               "code": 200,
               "_postman_previewlanguage": "json",
-              "header": [{ "key": "Content-Type", "value": "application/json; charset=utf-8" }],
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
               "body": "{\n  \"message\": \"success\",\n  \"data\": {\n    \"securities\": 13,\n    \"newRows\": 15402,\n    \"results\": [\n      { \"symbol\": \"FFC\", \"fetched\": 1240, \"saved\": 1240 },\n      { \"symbol\": \"KSE100\", \"fetched\": 1240, \"saved\": 1240 },\n      { \"symbol\": \"XYZ\", \"error\": 404 }\n    ]\n  }\n}"
             },
             {
@@ -576,12 +1000,27 @@
               "originalRequest": {
                 "method": "POST",
                 "header": [],
-                "url": { "raw": "{{baseUrl}}/market/sync/{{brokerAccountId}}", "host": ["{{baseUrl}}"], "path": ["market", "sync", "{{brokerAccountId}}"] }
+                "url": {
+                  "raw": "{{baseUrl}}/market/sync/{{brokerAccountId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "market",
+                    "sync",
+                    "{{brokerAccountId}}"
+                  ]
+                }
               },
               "status": "Unauthorized",
               "code": 401,
               "_postman_previewlanguage": "json",
-              "header": [{ "key": "Content-Type", "value": "application/json; charset=utf-8" }],
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
               "body": "{ \"error\": \"Broker session expired. Reconnect the account so a market session can be issued.\" }"
             }
           ]
@@ -593,11 +1032,27 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/market/prices/KSE100",
-              "host": ["{{baseUrl}}"],
-              "path": ["market", "prices", "KSE100"],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "market",
+                "prices",
+                "KSE100"
+              ],
               "query": [
-                { "key": "from", "value": "2026-08-01", "description": "YYYY-MM-DD — enable together with `to`; default window is the last 12 months", "disabled": true },
-                { "key": "to", "value": "2026-08-31", "description": "YYYY-MM-DD — inclusive; window max 5 years", "disabled": true }
+                {
+                  "key": "from",
+                  "value": "2026-08-01",
+                  "description": "YYYY-MM-DD — enable together with `to`; default window is the last 12 months",
+                  "disabled": true
+                },
+                {
+                  "key": "to",
+                  "value": "2026-08-31",
+                  "description": "YYYY-MM-DD — inclusive; window max 5 years",
+                  "disabled": true
+                }
               ]
             },
             "description": "Daily OHLCV bars for one symbol straight from the `daily_prices` table — no broker or market session needed. Change `KSE100` in the path to any stock symbol (case-insensitive).\n\nData is only as fresh as the last **Sync daily prices** run; `asOf` is the newest bar date returned.\n\n- Default window: the last 12 months ending today. Enable both `from` and `to` in the Params tab to change it (max 5 years).\n- Bars are oldest first. `open`/`high`/`low`/`volume` may be `null` on the close-only bar the broker sync writes.\n\n**Responses**\n- `200` `{ message: \"success\", data: { symbol, range, asOf, bars: [ { date, open, high, low, close, volume } ] } }`\n- `400` bad `from`/`to` (same rules as Positions)\n- `404` `{ error: \"security does not exist\" }`"
@@ -622,12 +1077,37 @@
               "originalRequest": {
                 "method": "GET",
                 "header": [],
-                "url": { "raw": "{{baseUrl}}/market/prices/KSE100?from=2026-08-01&to=2026-08-31", "host": ["{{baseUrl}}"], "path": ["market", "prices", "KSE100"], "query": [{ "key": "from", "value": "2026-08-01" }, { "key": "to", "value": "2026-08-31" }] }
+                "url": {
+                  "raw": "{{baseUrl}}/market/prices/KSE100?from=2026-08-01&to=2026-08-31",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "market",
+                    "prices",
+                    "KSE100"
+                  ],
+                  "query": [
+                    {
+                      "key": "from",
+                      "value": "2026-08-01"
+                    },
+                    {
+                      "key": "to",
+                      "value": "2026-08-31"
+                    }
+                  ]
+                }
               },
               "status": "OK",
               "code": 200,
               "_postman_previewlanguage": "json",
-              "header": [{ "key": "Content-Type", "value": "application/json; charset=utf-8" }],
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
               "body": "{\n  \"message\": \"success\",\n  \"data\": {\n    \"symbol\": \"KSE100\",\n    \"range\": { \"from\": \"2026-08-01\", \"to\": \"2026-08-31\" },\n    \"asOf\": \"2026-08-31\",\n    \"bars\": [\n      { \"date\": \"2026-08-03\", \"open\": 171020.5, \"high\": 171890.2, \"low\": 170411.7, \"close\": 171644.9, \"volume\": 231551200 },\n      { \"date\": \"2026-08-31\", \"open\": 175149.2, \"high\": 175796.2, \"low\": 174893.7, \"close\": 174929.7, \"volume\": 192168147 }\n    ]\n  }\n}"
             },
             {
@@ -635,13 +1115,513 @@
               "originalRequest": {
                 "method": "GET",
                 "header": [],
-                "url": { "raw": "{{baseUrl}}/market/prices/NOPE", "host": ["{{baseUrl}}"], "path": ["market", "prices", "NOPE"] }
+                "url": {
+                  "raw": "{{baseUrl}}/market/prices/NOPE",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "market",
+                    "prices",
+                    "NOPE"
+                  ]
+                }
               },
               "status": "Not Found",
               "code": 404,
               "_postman_previewlanguage": "json",
-              "header": [{ "key": "Content-Type", "value": "application/json; charset=utf-8" }],
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
               "body": "{ \"error\": \"security does not exist\" }"
+            }
+          ]
+        },
+        {
+          "name": "Import securities list (one time)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/market/securities/{{brokerAccountId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "market",
+                "securities",
+                "{{brokerAccountId}}"
+              ]
+            },
+            "description": "One-time import of the broker's full symbol list (`GET /Home/GetSymolsList`). Fills `securities` with every **Approved**, non-futures symbol on the exchange (~557 rows) with real company names and sectors, so `Search securities` has something to find. Also upgrades the placeholder rows the trade sync created (name = symbol).\n\nSafe to re-run — upserts by symbol. Needs a live broker session.\n\n**Responses**\n- `200` `{ data: { received, saved } }` — raw rows received vs distinct symbols saved\n- `401` `{ error: \"Broker session expired. Reconnect the account.\" }`\n- `404` `{ error: \"account does not exist\" }`"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "const data = pm.response.json()?.data;",
+                  "if (data) console.log(`received ${data.received} rows, saved ${data.saved} securities`);"
+                ]
+              }
+            }
+          ],
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/market/securities/{{brokerAccountId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "market",
+                    "securities",
+                    "{{brokerAccountId}}"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "body": "{ \"message\": \"success\", \"data\": { \"received\": 1644, \"saved\": 557 } }"
+            }
+          ]
+        },
+        {
+          "name": "Search securities",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/market/securities?q=fert",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "market",
+                "securities"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "fert",
+                  "description": "At least 2 characters. Matches symbol or company name, case-insensitive."
+                }
+              ]
+            },
+            "description": "Search `securities` by symbol or company name — the picker for adding to the watchlist. Database only; no broker session needed. Returns at most 20 rows.\n\nThe test script saves the first result's `id` into the `securityId` collection variable, ready for `Add to watchlist`.\n\n**Responses**\n- `200` `{ data: { securities: [ { id, symbol, companyName, sector } ] } }`\n- `400` `{ error: \"q must be at least 2 characters\" }`"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "const list = pm.response.json()?.data?.securities ?? [];",
+                  "pm.test('returned an array', () => pm.expect(list).to.be.an('array'));",
+                  "if (list[0]) {",
+                  "  pm.collectionVariables.set('securityId', list[0].id);",
+                  "  console.log(`${list.length} results; securityId set to ${list[0].symbol} (${list[0].id})`);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/market/securities?q=fert",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "market",
+                    "securities"
+                  ],
+                  "query": [
+                    {
+                      "key": "q",
+                      "value": "fert"
+                    }
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "body": "{\n  \"message\": \"success\",\n  \"data\": {\n    \"securities\": [\n      { \"id\": \"…\", \"symbol\": \"EFERT\", \"companyName\": \"Engro Fertilizers Limited\", \"sector\": \"FERTILIZER\" },\n      { \"id\": \"…\", \"symbol\": \"FFC\", \"companyName\": \"Fauji Fertilizer Company Limited\", \"sector\": \"FERTILIZER\" }\n    ]\n  }\n}"
+            },
+            {
+              "name": "400 Query too short",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/market/securities?q=f",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "market",
+                    "securities"
+                  ],
+                  "query": [
+                    {
+                      "key": "q",
+                      "value": "f"
+                    }
+                  ]
+                }
+              },
+              "status": "Bad Request",
+              "code": 400,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "body": "{ \"error\": \"q must be at least 2 characters\" }"
+            }
+          ]
+        },
+        {
+          "name": "Trend vs KSE100 (chart)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/market/trend/FFC?period=6M",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "market",
+                "trend",
+                "FFC"
+              ],
+              "query": [
+                {
+                  "key": "period",
+                  "value": "6M",
+                  "description": "1W | 1M | 3M | 6M | 1Y | 3Y | 5Y  (default 6M; 1D not supported)"
+                }
+              ]
+            },
+            "description": "One stock against the `KSE100` benchmark over a period, **both rebased to 100 on the first day**, so they share one axis. The payload for the two-line comparison chart. Change `FFC` in the path to any symbol.\n\nOnly trading days both series have are returned, so the lines always align. If the stock listed after the window began the range is clamped — check `range.from`.\n\nChart `stock` and `benchmark`; show `close` in the tooltip; put `summary` in the header. `outperformance` = `stockReturn − benchmarkReturn` in percentage points.\n\n**Responses**\n- `200` `{ data: { symbol, period, range, series: [ { date, close, stock, benchmark } ], summary: { stockReturn, benchmarkReturn, outperformance } } }`\n- `400` `{ error: \"period must be one of 1W, 1M, 3M, 6M, 1Y, 3Y, 5Y\" }`\n- `404` `{ error: \"security does not exist\" }`\n- `404` `{ error: \"not enough price history for this period\" }`"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "const data = pm.response.json()?.data;",
+                  "pm.test('series is an array', () => pm.expect(data?.series).to.be.an('array'));",
+                  "if (data) console.log(`${data.symbol} ${data.period}: ${data.series.length} pts, stock ${data.summary.stockReturn.toFixed(2)}% vs KSE100 ${data.summary.benchmarkReturn.toFixed(2)}% -> ${data.summary.outperformance.toFixed(2)} pts`);"
+                ]
+              }
+            }
+          ],
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/market/trend/FFC?period=6M",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "market",
+                    "trend",
+                    "FFC"
+                  ],
+                  "query": [
+                    {
+                      "key": "period",
+                      "value": "6M"
+                    }
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "body": "{\n  \"message\": \"success\",\n  \"data\": {\n    \"symbol\": \"FFC\",\n    \"period\": \"6M\",\n    \"range\": { \"from\": \"2026-03-09\", \"to\": \"2026-09-04\" },\n    \"series\": [\n      { \"date\": \"2026-03-09\", \"close\": 471.4, \"stock\": 100, \"benchmark\": 100 },\n      { \"date\": \"2026-09-04\", \"close\": 548.11, \"stock\": 116.27, \"benchmark\": 119.69 }\n    ],\n    \"summary\": { \"stockReturn\": 16.27, \"benchmarkReturn\": 19.69, \"outperformance\": -3.42 }\n  }\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Watchlist",
+      "description": "A per-user list of securities to follow. Find things to add with `Market data → Search securities` (which sets `securityId`). Watched symbols are included automatically in `Sync daily prices`.",
+      "item": [
+        {
+          "name": "List watchlist",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/watchlist",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "watchlist"
+              ]
+            },
+            "description": "Your watchlist with the latest price and the day's change per item, plus the same for `KSE100` as a benchmark row to show on top. Comes from `daily_prices` (last two closes), so it is as fresh as the last price sync.\n\n**Nulls to handle:** a symbol added since the last sync has no bars → `lastPrice`, `change`, `changePct`, `asOf` all `null`. One bar only → `change`/`changePct` null. Render \"—\", not 0.\n\n**Responses**\n- `200` `{ data: { benchmark: { securityId, symbol, companyName, sector, lastPrice, change, changePct, asOf }, items: [ …same shape… ] } }`"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "const data = pm.response.json()?.data;",
+                  "pm.test('items is an array', () => pm.expect(data?.items).to.be.an('array'));",
+                  "if (data) console.log(`${data.items.length} items; KSE100 ${data.benchmark?.changePct?.toFixed(2)}%`);"
+                ]
+              }
+            }
+          ],
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/watchlist",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "watchlist"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "body": "{\n  \"message\": \"success\",\n  \"data\": {\n    \"benchmark\": { \"securityId\": \"…\", \"symbol\": \"KSE100\", \"companyName\": \"KSE-100 Index\", \"sector\": null, \"lastPrice\": 175328.82, \"change\": 399.13, \"changePct\": 0.23, \"asOf\": \"2026-09-04\" },\n    \"items\": [\n      { \"securityId\": \"…\", \"symbol\": \"MLCF\", \"companyName\": \"Maple Leaf Cement Factory Limited\", \"sector\": \"CEMENT\", \"lastPrice\": 101.46, \"change\": 2.4, \"changePct\": 2.42, \"asOf\": \"2026-09-04\" },\n      { \"securityId\": \"…\", \"symbol\": \"FFC\", \"companyName\": \"Fauji Fertilizer Company Limited\", \"sector\": \"FERTILIZER\", \"lastPrice\": 548.11, \"change\": -0.57, \"changePct\": -0.10, \"asOf\": \"2026-09-04\" }\n    ]\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Add to watchlist",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/watchlist/{{securityId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "watchlist",
+                "{{securityId}}"
+              ]
+            },
+            "description": "Add a security to your watchlist. `securityId` is a `securities.id` — run `Search securities` first and it is set for you. Idempotent: adding the same one again returns `200` and changes nothing. No body.\n\n**Responses**\n- `200` `{ message: \"success\", data: { symbol } }`\n- `404` `{ error: \"security does not exist\" }`"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "const data = pm.response.json()?.data;",
+                  "if (data) console.log(`added ${data.symbol}`);"
+                ]
+              }
+            }
+          ],
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/watchlist/{{securityId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "watchlist",
+                    "{{securityId}}"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "body": "{ \"message\": \"success\", \"data\": { \"symbol\": \"FFC\" } }"
+            },
+            {
+              "name": "404 Unknown security",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/watchlist/00000000-0000-0000-0000-000000000000",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "watchlist",
+                    "00000000-0000-0000-0000-000000000000"
+                  ]
+                }
+              },
+              "status": "Not Found",
+              "code": 404,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "body": "{ \"error\": \"security does not exist\" }"
+            }
+          ]
+        },
+        {
+          "name": "Remove from watchlist",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/watchlist/{{securityId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "watchlist",
+                "{{securityId}}"
+              ]
+            },
+            "description": "Remove a security from your watchlist. Scoped to you — an id that is not on your list is a `404`.\n\n**Responses**\n- `200` `{ message: \"success\" }`\n- `404` `{ error: \"not in watchlist\" }`"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/watchlist/{{securityId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "watchlist",
+                    "{{securityId}}"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "body": "{ \"message\": \"success\" }"
+            },
+            {
+              "name": "404 Not on list",
+              "originalRequest": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/watchlist/{{securityId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "watchlist",
+                    "{{securityId}}"
+                  ]
+                }
+              },
+              "status": "Not Found",
+              "code": 404,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "body": "{ \"error\": \"not in watchlist\" }"
             }
           ]
         }

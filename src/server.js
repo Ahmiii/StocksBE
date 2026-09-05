@@ -4,6 +4,7 @@ import AuthRoutes from "./routes/authRoutes.js";
 import BrokerAcccountRoutes from "./routes/brokerAccountRoutes.js";
 import PortfolioRouts from "./routes/portfolioRoutes.js";
 import MarketRoutes from "./routes/marketRoutes.js";
+import WatchlistRoutes from "./routes/watchlistRoutes.js";
 connectDB();
 
 const app = express();
@@ -12,6 +13,7 @@ app.use("/auth", AuthRoutes);
 app.use("/broker", BrokerAcccountRoutes);
 app.use("/portfolio", PortfolioRouts);
 app.use("/market", MarketRoutes);
+app.use("/watchlist", WatchlistRoutes);
 const PORT = process.env.PORT || 5001;
 const server = app.listen(PORT, () => {
   console.log(`Server is running on ${PORT}`);
