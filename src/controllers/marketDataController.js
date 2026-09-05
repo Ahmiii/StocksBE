@@ -9,6 +9,7 @@ import {
   BROKER_HOUSE_NAME,
 } from "../config/constants.js";
 import { buildCookieHeader, parseSetCookies } from "../utils/extractAHLInfor.js";
+import { parseDateRange, formatDate } from "../utils/dateRange.js";
 import {
   getSession,
   saveMarketSession,
@@ -158,9 +159,6 @@ const fetchMarket = async (path, cookieHeader) => {
 const toTradeDate = (value) =>
   new Date(`${String(value).slice(0, 10)}T00:00:00Z`);
 
-// Writes the bars we do not already have. skipDuplicates leans on the
-// @@unique([securityId, tradeDate]) constraint, so re-running is harmless and
-// we do not need to check what exists first.
 const savePrices = async (securityId, bars) => {
   const rows = bars.map((bar) => ({
     securityId,
@@ -222,8 +220,6 @@ const syncPrices = async (req, res) => {
       const saved = await savePrices(security.id, bars);
       results.push({ symbol: security.symbol, fetched: bars.length, saved });
     } catch (error) {
-      // A 401 means the market session lapsed mid-run; drop it so the next
-      // request runs the handoff again rather than reusing a dead cookie.
       if (error.response?.status === 401) clearMarketSession(account.id);
       results.push({
         symbol: security.symbol,
@@ -242,4 +238,41 @@ const syncPrices = async (req, res) => {
   });
 };
 
-export { syncPrices };
+
+const getPrices = async (req, res) => {
+  const symbol = req.params.symbol.toUpperCase();
+  const { from, to, error } = parseDateRange(req.query);
+  if (error) return res.status(400).json({ error });
+
+  const security = await prisma.security.findUnique({ where: { symbol } });
+  if (!security) {
+    return res.status(404).json({ error: "security does not exist" });
+  }
+
+  const rows = await prisma.dailyPrice.findMany({
+    where: { securityId: security.id, tradeDate: { gte: from, lte: to } },
+    orderBy: { tradeDate: "asc" },
+  });
+
+  const num = (value) => (value == null ? null : Number(value));
+  const bars = rows.map((bar) => ({
+    date: bar.tradeDate.toISOString().slice(0, 10),
+    open: num(bar.open),
+    high: num(bar.high),
+    low: num(bar.low),
+    close: num(bar.close),
+    volume: num(bar.volume),
+  }));
+
+  res.status(200).json({
+    message: "success",
+    data: {
+      symbol,
+      range: { from: formatDate(from), to: formatDate(to) },
+      asOf: bars.at(-1)?.date ?? null,
+      bars,
+    },
+  });
+};
+
+export { syncPrices, getPrices };

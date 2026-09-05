@@ -157,6 +157,7 @@ Backend/
 │   ├── utils/
 │   │   ├── extractAHLInfor.js   # Parses broker HTML/cookies, builds login form body
 │   │   ├── tradeData.js         # Normalises trades, calculates/merges/reconciles positions
+│   │   ├── dateRange.js         # Parses ?from=&to= (shared by positions and price history)
 │   │   ├── generateToken.js     # Signs the JWT and sets a cookie
 │   │   └── test.js              # Old experiment script — NOT used by the server (see section 14)
 │   └── generated/prisma/        # Generated Prisma client (git-ignored)
@@ -431,6 +432,7 @@ Every protected endpoint filters by `req.user.id`. A user can only see or change
 | 8 | GET | `/portfolio/:id/positions` | 🔒 | Current holdings with P&L and a summary |
 | 9 | GET | `/portfolio/:id/trades` | 🔒 | Paginated trade history |
 | 10 | POST | `/market/sync/:id` | 🔒 | Download ~5 years of daily prices for all securities |
+| 11 | GET | `/market/prices/:symbol` | 🔒 | Stored daily price bars for one symbol (e.g. `KSE100`) |
 
 ---
 
@@ -699,9 +701,22 @@ Example: `POST /broker/accounts/8a2e…/sync?from=2024-01-01&to=2024-12-31`
 
 #### 8. `GET /portfolio/:id/positions` 🔒
 
-Current holdings with the latest known price and profit/loss numbers. All numbers are real JSON numbers (not strings).
+Current holdings with the latest known price and profit/loss numbers. All numbers are real JSON numbers (not strings). Optionally also returns a price **trend** per stock for a date range, for charts.
 
 **Path params:** `id` — portfolio UUID.
+
+**Query params (optional — send both or neither)**
+
+| Param | Format | Default | Notes |
+|---|---|---|---|
+| `from` | `YYYY-MM-DD` | today − 1 year | Start of the trend window (inclusive). |
+| `to` | `YYYY-MM-DD` | today | End of the trend window (inclusive). Must not be before `from`; the window may be at most 5 years wide. |
+
+Each position gets a `trend` array of `{ date, close }` in oldest-first order for the window. Without dates the window is the **last 12 months ending today**. One PSX trading year is about 249 bars.
+
+**Which stocks are returned:** only those **held at some point inside the window** — the quantity at the start of `from` was above zero, or there was a BUY inside the window. So a stock bought after `to` is left out, and with the default window a stock you fully sold more than a year ago is left out too. A position with no trade rows at all (shares that only appear in the broker's holdings list) is kept while its quantity is above zero. `summary` totals only the rows returned, so for a past window it means "today's value of what I held then" — call the endpoint without dates for the headline numbers.
+
+Example: `GET /portfolio/c47b…/positions?from=2025-09-05&to=2026-09-05`
 
 **Success — `200 OK`**
 
@@ -709,6 +724,7 @@ Current holdings with the latest known price and profit/loss numbers. All number
 {
   "message": "success",
   "data": {
+    "range": { "from": "2025-09-05", "to": "2026-09-05" },
     "positions": [
       {
         "id": "d1a0…",
@@ -723,7 +739,12 @@ Current holdings with the latest known price and profit/loss numbers. All number
         "marketValue": 65120,
         "unrealizedPnl": 8745,
         "unrealizedPct": 15.51,
-        "realizedPnl": 1200
+        "realizedPnl": 1200,
+        "trend": [
+          { "date": "2025-09-05", "close": 101.2 },
+          { "date": "2025-09-08", "close": 102.75 },
+          { "date": "2026-09-04", "close": 118.4 }
+        ]
       }
     ],
     "summary": {
@@ -748,8 +769,19 @@ Current holdings with the latest known price and profit/loss numbers. All number
 | `unrealizedPnl` | `marketValue − investedValue` (or `null`) |
 | `unrealizedPct` | `unrealizedPnl / investedValue × 100` (or `null`) |
 | `summary.*` | Totals **only over positions that have a price** (`quantity > 0` and `lastPrice` not null). `unpricedPositions` tells the UI how many were left out, so it can show a warning instead of quietly under-reporting. |
+| `trend` | All `daily_prices` rows for that stock inside the window, oldest first. `[]` when the stock has no bars in the window (e.g. a delisted stock) — `lastPrice` still comes from the newest bar it ever had, so `summary` never changes with the window. |
+| `range` | The window used (the default is the last 12 months ending today). |
 
 If the portfolio is not yours, `positions` is simply an empty array (status 200).
+
+**Errors**
+
+| Status | Body | When |
+|---|---|---|
+| 400 | `{ "error": "from and to must be sent together." }` | Only one of the two dates was sent. |
+| 400 | `{ "error": "from and to must be YYYY-MM-DD dates." }` | Bad format or impossible date (e.g. `2026-02-31`). |
+| 400 | `{ "error": "from must not be after to." }` | Reversed window. |
+| 400 | `{ "error": "Range is too wide: at most 5 years." }` | Window longer than 5 years. |
 
 ---
 
@@ -834,6 +866,48 @@ Each item in `results` is either `{ symbol, fetched, saved }` or `{ symbol, erro
 | 404 | `{ "error": "account does not exist" }` | Not found / not yours. |
 
 > This call fetches symbols one after another and can take a while (many seconds to minutes) when there are many securities. The HTTP request stays open until it finishes.
+
+---
+
+#### 11. `GET /market/prices/:symbol` 🔒
+
+Daily price bars for one symbol, read straight from the `daily_prices` table. No broker or market session is needed, so it works whenever the database does — but the data is only as fresh as the last `POST /market/sync/:id` run, which is why `asOf` is returned. Use it for the KSE-100 benchmark line (`/market/prices/KSE100`) or for any single stock's chart.
+
+**Path params:** `symbol` — stock or index symbol, case-insensitive (e.g. `KSE100`, `ffc`).
+
+**Query params (optional — send both or neither)**
+
+| Param | Default | Notes |
+|---|---|---|
+| `from` / `to` | last 12 months ending today | `YYYY-MM-DD`; same rules as the positions endpoint (inclusive, `from ≤ to`, max 5 years). Every bar inside the window is returned. |
+
+Examples: `GET /market/prices/KSE100` (last year) · `GET /market/prices/KSE100?from=2026-08-01&to=2026-08-31`
+
+**Success — `200 OK`**
+
+```json
+{
+  "message": "success",
+  "data": {
+    "symbol": "KSE100",
+    "range": { "from": "2026-08-01", "to": "2026-08-31" },
+    "asOf": "2026-08-31",
+    "bars": [
+      { "date": "2026-08-03", "open": 171020.5, "high": 171890.2, "low": 170411.7, "close": 171644.9, "volume": 231551200 },
+      { "date": "2026-08-31", "open": 175149.2, "high": 175796.2, "low": 174893.7, "close": 174929.7, "volume": 192168147 }
+    ]
+  }
+}
+```
+
+Bars are oldest first. `open`, `high`, `low`, `volume` can be `null` for the placeholder bar the broker sync writes (it only knows the close).
+
+**Errors**
+
+| Status | Body | When |
+|---|---|---|
+| 400 | same four messages as the positions endpoint | Bad `from`/`to`. |
+| 404 | `{ "error": "security does not exist" }` | Symbol never seen by any sync. |
 
 ---
 

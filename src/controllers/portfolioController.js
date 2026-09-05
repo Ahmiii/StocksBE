@@ -1,4 +1,5 @@
 import { prisma } from "../config/db.js";
+import { parseDateRange, formatDate } from "../utils/dateRange.js";
 
 const portfolioList = async (req, res) => {
   const portfoliolist = await prisma.portfolio.findMany({
@@ -16,6 +17,9 @@ const portfolioList = async (req, res) => {
 
 const positionsList = async (req, res) => {
   const portfolioId = req?.params?.id;
+  const { from, to, error } = parseDateRange(req.query);
+  if (error) return res.status(400).json({ error });
+
   const rows = await prisma.position.findMany({
     where: {
       portfolioId: portfolioId,
@@ -26,6 +30,7 @@ const positionsList = async (req, res) => {
     select: {
       id: true,
       portfolioId: true,
+      securityId: true,
       quantity: true,
       avgCost: true,
       realizedPnl: true,
@@ -33,8 +38,8 @@ const positionsList = async (req, res) => {
         select: {
           symbol: true,
           companyName: true,
-          // Only the newest bar. Holdings in the sub-investor CDC account have
-          // no price at all, which is why lastPrice can come back null.
+          // Only the newest bar, for lastPrice. Holdings in the sub-investor
+          // CDC account have no price at all, which is why it can be null.
           dailyPrices: {
             orderBy: { tradeDate: "desc" },
             take: 1,
@@ -45,9 +50,41 @@ const positionsList = async (req, res) => {
     },
   });
 
+  // Only stocks held at some point in the window: quantity at `from` was
+  // positive, or there was a buy inside it. A position with no trade rows at
+  // all (shares that only exist in the broker's holdings list) is kept as-is.
+  const trades = await prisma.trade.findMany({
+    where: { portfolioId },
+    select: { securityId: true, side: true, quantity: true, executedAt: true },
+  });
+  const tradesBySecurity = Object.groupBy(trades, (t) => t.securityId);
+  const held = rows.filter((row) => {
+    const list = tradesBySecurity[row.securityId];
+    if (!list) return Number(row.quantity) > 0;
+    let qtyAtFrom = 0;
+    for (const t of list) {
+      if (t.executedAt > to) continue;
+      if (t.executedAt < from) qtyAtFrom += (t.side === "BUY" ? 1 : -1) * Number(t.quantity);
+      else if (t.side === "BUY") return true;
+    }
+    return qtyAtFrom > 0;
+  });
+
+  // Trend bars are a separate query so a stock with nothing in the requested
+  // range (e.g. delisted) still keeps its lastPrice from above.
+  const bars = await prisma.dailyPrice.findMany({
+    where: {
+      securityId: { in: held.map((row) => row.securityId) },
+      tradeDate: { gte: from, lte: to },
+    },
+    orderBy: { tradeDate: "asc" },
+    select: { securityId: true, tradeDate: true, close: true },
+  });
+  const trendBySecurity = Object.groupBy(bars, (bar) => bar.securityId);
+
   // Prisma hands Decimals back as strings, so everything is converted once here
   // rather than in every client that renders a number.
-  const positions = rows.map((row) => {
+  const positions = held.map((row) => {
     const quantity = Number(row.quantity);
     const avgCost = Number(row.avgCost);
     const bar = row.security.dailyPrices[0];
@@ -73,6 +110,10 @@ const positionsList = async (req, res) => {
           ? null
           : ((marketValue - investedValue) / investedValue) * 100,
       realizedPnl: Number(row.realizedPnl),
+      trend: (trendBySecurity[row.securityId] ?? []).map((b) => ({
+        date: formatDate(b.tradeDate),
+        close: Number(b.close),
+      })),
     };
   });
 
@@ -85,9 +126,8 @@ const positionsList = async (req, res) => {
   res?.status(200)?.json({
     message: "success",
     data: {
+      range: { from: formatDate(from), to: formatDate(to) },
       positions,
-      // Totals cover only the positions we can price, so the client can say so
-      // rather than quietly understating the portfolio.
       summary: {
         invested,
         marketValue,
