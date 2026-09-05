@@ -6,6 +6,7 @@ import {
   AJAX_HEADERS,
   BROKER_URL,
   BROKER_ANALYTICS_PATH,
+  BROKER_SYMBOLS_PATH,
   BROKER_HOUSE_NAME,
 } from "../config/constants.js";
 import { buildCookieHeader, parseSetCookies } from "../utils/extractAHLInfor.js";
@@ -275,4 +276,57 @@ const getPrices = async (req, res) => {
   });
 };
 
-export { syncPrices, getPrices };
+// One-time import of every tradable symbol, for the watchlist.
+const syncSecurities = async (req, res) => {
+  const account = await prisma.brokerAccount.findFirst({
+    where: { id: req.params.id, userId: req.user.id },
+    select: { id: true, clientCode: true },
+  });
+  if (!account) return res.status(404).json({ error: "account does not exist" });
+
+  const session = getSession(account.id);
+  if (!session) {
+    return res.status(401).json({ error: "Broker session expired. Reconnect the account." });
+  }
+
+  const jar = {
+    trader: account.clientCode,
+    HouseName: BROKER_HOUSE_NAME,
+    ...session.cookieJar,
+  };
+  const response = await axios.get(`${BROKER_URL}${BROKER_SYMBOLS_PATH}`, {
+    headers: {
+      ...BROWSER_HEADERS,
+      ...AJAX_HEADERS,
+      Referer: `${BROKER_URL}/Home/Index`,
+      cookie: buildCookieHeader(jar),
+    },
+  });
+
+  // Each symbol is listed once per market (REG/ODL/FUT) but Security.symbol is
+  // unique. Skip futures contracts and keep one row per symbol.
+  const bySymbol = new Map();
+  for (const row of response.data ?? []) {
+    if (row.approved !== "Approved" || row.market === "FUT") continue;
+    bySymbol.set(row.symbol, row);
+  }
+
+  for (const row of bySymbol.values()) {
+    const data = {
+      companyName: row.symbolName,
+      sector: row.sectorName || null,
+    };
+    await prisma.security.upsert({
+      where: { symbol: row.symbol },
+      create: { symbol: row.symbol, ...data },
+      update: data,
+    });
+  }
+
+  res.status(200).json({
+    message: "success",
+    data: { received: response.data?.length ?? 0, saved: bySymbol.size },
+  });
+};
+
+export { syncPrices, getPrices, syncSecurities };

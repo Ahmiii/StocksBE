@@ -77,6 +77,9 @@ const INVALID_LOGIN_PATTERN = /Invalid Login Credentials/i;
 // the credential their market API actually checks.
 const BROKER_ANALYTICS_PATH = "/Home/GetAnalyticsURL";
 
+// Every tradable symbol on the exchange. "Symols" is the broker's typo.
+const BROKER_SYMBOLS_PATH = "/Home/GetSymolsList";
+
 export {
   BROWSER_HEADERS,
   NAVIGATION_HEADERS,
@@ -92,4 +95,5 @@ export {
   SESSION_COOKIE_NAME,
   INVALID_LOGIN_PATTERN,
   BROKER_ANALYTICS_PATH,
+  BROKER_SYMBOLS_PATH,
 };
