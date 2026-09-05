@@ -208,14 +208,41 @@ const syncPrices = async (req, res) => {
     update: {},
   });
 
+  // Only what is held, plus the benchmark. The securities table carries the
+  // whole exchange (~557 rows) for the watchlist; fetching five years for each
+  // would be hundreds of calls for data nobody looks at.
   const securities = await prisma.security.findMany({
-    select: { id: true, symbol: true },
+    where: {
+      OR: [
+        { positions: { some: { quantity: { gt: 0 } } } },
+        { symbol: BENCHMARK_SYMBOL },
+      ],
+    },
+    select: {
+      id: true,
+      symbol: true,
+      dailyPrices: {
+        orderBy: { tradeDate: "desc" },
+        take: 1,
+        select: { tradeDate: true },
+      },
+    },
     orderBy: { symbol: "asc" },
+  });
+
+  const today = new Date().toLocaleDateString("en-CA", {
+    timeZone: "Asia/Karachi",
   });
 
   const results = [];
 
   for (const security of securities) {
+    const latest = security.dailyPrices[0];
+    if (latest && latest.tradeDate.toISOString().slice(0, 10) >= today) {
+      results.push({ symbol: security.symbol, skipped: "already current" });
+      continue;
+    }
+
     try {
       const bars = await fetchMarket(`/daily/${security.symbol}`, cookieHeader);
       const saved = await savePrices(security.id, bars);
@@ -227,12 +254,17 @@ const syncPrices = async (req, res) => {
         error: error.response?.status ?? error.message,
       });
     }
+
+    // Space the calls out so a sync reads as a person browsing, not a scraper.
+    await new Promise((resolve) => setTimeout(resolve, 400));
   }
 
   res.status(200).json({
     message: "success",
     data: {
       securities: results.length,
+      fetched: results.filter((r) => r.fetched != null).length,
+      skipped: results.filter((r) => r.skipped).length,
       newRows: results.reduce((sum, r) => sum + (r.saved ?? 0), 0),
       results,
     },

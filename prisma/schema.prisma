@@ -8,13 +8,15 @@ datasource db {
 }
 
 model User {
-  id                String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  email             String          @unique @db.VarChar(255)
-  passwordHash      String          @map("password_hash") @db.VarChar(255)
-  fullName          String          @map("full_name") @db.VarChar(120)
-  createdAt         DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
-  brokerAccounts    BrokerAccount[]
-  portfolios        Portfolio[]
+  id             String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email          String          @unique @db.VarChar(255)
+  passwordHash   String          @map("password_hash") @db.VarChar(255)
+  fullName       String          @map("full_name") @db.VarChar(120)
+  createdAt      DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  brokerAccounts BrokerAccount[]
+  portfolios     Portfolio[]
+  watchlistItems WatchlistItem[]
+
   @@map("users")
 }
 
@@ -31,10 +33,11 @@ model BrokerAccount {
   createdAt      DateTime    @default(now()) @map("created_at") @db.Timestamptz
   user           User        @relation(fields: [userId], references: [id])
   portfolios     Portfolio[]
+  trades         Trade[]
+
   @@unique([userId, broker, clientCode])
   @@index([userId])
   @@map("broker_accounts")
-  trades Trade[]
 }
 
 model Portfolio {
@@ -46,25 +49,42 @@ model Portfolio {
   createdAt       DateTime       @default(now()) @map("created_at") @db.Timestamptz
   user            User           @relation(fields: [userId], references: [id])
   brokerAccount   BrokerAccount? @relation(fields: [brokerAccountId], references: [id])
+  trades          Trade[]
+  positions       Position[]
+
   @@index([userId])
   @@map("portfolios")
-  trades Trade[]
-  positions Position[]
 }
 
 model Security {
-  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  symbol        String   @unique @db.VarChar(16)
-  isin          String?  @unique @db.VarChar(12)
-  companyName   String   @map("company_name") @db.VarChar(255)
-  sector        String?  @db.VarChar(120)
-  listingStatus String   @default("listed") @map("listing_status") @db.VarChar(16)
-  updatedAt     DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  id             String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  symbol         String          @unique @db.VarChar(16)
+  isin           String?         @unique @db.VarChar(12)
+  companyName    String          @map("company_name") @db.VarChar(255)
+  sector         String?         @db.VarChar(120)
+  listingStatus  String          @default("listed") @map("listing_status") @db.VarChar(16)
+  updatedAt      DateTime        @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  trades         Trade[]
+  positions      Position[]
+  dailyPrices    DailyPrice[]
+  watchlistItems WatchlistItem[]
 
   @@map("securities")
-  trades Trade[]
-  positions Position[]
-  dailyPrices DailyPrice[]
+}
+
+model WatchlistItem {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId     String   @map("user_id") @db.Uuid
+  securityId String   @map("security_id") @db.Uuid
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  user     User     @relation(fields: [userId], references: [id])
+  security Security @relation(fields: [securityId], references: [id])
+
+  // Adding the same symbol twice is a no-op rather than a duplicate row.
+  @@unique([userId, securityId])
+  @@index([userId])
+  @@map("watchlist_items")
 }
 
 model Trade {
@@ -89,25 +109,26 @@ model Trade {
   portfolio     Portfolio      @relation(fields: [portfolioId], references: [id])
   security      Security       @relation(fields: [securityId], references: [id])
   brokerAccount BrokerAccount? @relation(fields: [brokerAccountId], references: [id], onDelete: Restrict)
+
   @@unique([brokerAccountId, brokerTradeId])
   @@index([portfolioId, executedAt(sort: Desc)])
   @@index([securityId])
   @@map("trades")
 }
+
 model Position {
-  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  portfolioId String   @map("portfolio_id") @db.Uuid
-  securityId  String   @map("security_id") @db.Uuid
-  quantity    Decimal  @default(0) @db.Decimal(18, 4)
-  avgCost     Decimal  @default(0) @map("avg_cost") @db.Decimal(18, 4)
-  realizedPnl Decimal  @default(0) @map("realized_pnl") @db.Decimal(18, 4)
-  asOf        DateTime @default(now()) @map("as_of") @db.Timestamptz
-  portfolio Portfolio @relation(fields: [portfolioId], references: [id])
-  security  Security  @relation(fields: [securityId], references: [id])
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  portfolioId String    @map("portfolio_id") @db.Uuid
+  securityId  String    @map("security_id") @db.Uuid
+  quantity    Decimal   @default(0) @db.Decimal(18, 4)
+  avgCost     Decimal   @default(0) @map("avg_cost") @db.Decimal(18, 4)
+  realizedPnl Decimal   @default(0) @map("realized_pnl") @db.Decimal(18, 4)
+  asOf        DateTime  @default(now()) @map("as_of") @db.Timestamptz
+  portfolio   Portfolio @relation(fields: [portfolioId], references: [id])
+  security    Security  @relation(fields: [securityId], references: [id])
 
   @@unique([portfolioId, securityId])
   @@index([securityId])
-
   @@map("positions")
 }
 
@@ -123,10 +144,9 @@ model DailyPrice {
   fetchedAt  DateTime @default(now()) @map("fetched_at") @db.Timestamptz
 
   // Relations
-  security   Security @relation(fields: [securityId], references: [id])
+  security Security @relation(fields: [securityId], references: [id])
 
   // Composite unique constraint
   @@unique([securityId, tradeDate])
-  
   @@map("daily_prices")
 }
