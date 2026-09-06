@@ -372,6 +372,11 @@ const searchSecurities = async (req, res) => {
         { symbol: { contains: q, mode: "insensitive" } },
         { companyName: { contains: q, mode: "insensitive" } },
       ],
+
+      positions: {
+        none: { quantity: { gt: 0 }, portfolio: { userId: req.user.id } },
+      },
+      watchlistItems: { none: { userId: req.user.id } },
     },
     select: { id: true, symbol: true, companyName: true, sector: true },
     orderBy: { symbol: "asc" },
@@ -450,4 +455,12 @@ const getTrend = async (req, res) => {
   });
 };
 
-export { syncPrices, getPrices, syncSecurities, searchSecurities, getTrend };
+export {
+  syncPrices,
+  getPrices,
+  syncSecurities,
+  searchSecurities,
+  getTrend,
+  fetchMarket,
+  savePrices,
+};

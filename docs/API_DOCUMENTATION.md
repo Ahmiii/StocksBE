@@ -969,6 +969,8 @@ The `:id` is a **broker account** id; the call needs that account's live broker 
 
 Search `securities` by symbol or company name, case-insensitive — the picker for "add to watchlist". Reads the database only; no broker or market session needed.
 
+Two kinds of row are excluded, both per-user: stocks you **currently hold** (a position with quantity > 0 in any of your portfolios — they already appear on the portfolio screen) and stocks **already on your watchlist**. So the picker only ever offers things you can usefully add, and the same query returns different rows for different users.
+
 **Query params**
 
 | Param | Required | Notes |
@@ -1089,13 +1091,17 @@ The user's watchlist with the latest price and the day's move for each item, plu
 
 Add a security to the watchlist. Idempotent — adding one that is already there returns `200` and changes nothing (unique index on `(user_id, security_id)`). No request body.
 
+**Fetch-on-add.** If the security has no rows in `daily_prices` yet, and a market session is alive for one of your broker accounts (the analytics cookie cached by a sync in the last ~2 hours), its full price history is downloaded in the same request — one call, ~1,240 rows — so the stock appears in `GET /watchlist` with a price straight away. If there is no live session the row is still inserted and `pricesLoaded` is `false`; the next `POST /market/sync/:id` fills it in, because watched symbols are in the sync scope. A security that already has prices is never re-fetched.
+
 **Path params:** `securityId` — a `securities.id`, typically from `GET /market/securities?q=`.
 
 **Success — `200 OK`**
 
 ```json
-{ "message": "success", "data": { "symbol": "FFC" } }
+{ "message": "success", "data": { "symbol": "FFC", "pricesLoaded": true } }
 ```
+
+`pricesLoaded: false` means "show — for now"; it fills on the next price sync.
 
 **Errors**
 
@@ -1108,6 +1114,8 @@ Add a security to the watchlist. Idempotent — adding one that is already there
 #### 17. `DELETE /watchlist/:securityId` 🔒
 
 Remove a security from the watchlist. Scoped to the caller — a `securityId` that is on someone else's list, or on nobody's, is a `404`.
+
+Only the `watchlist_items` link row is deleted. The `securities` row and its `daily_prices` history are kept — they are shared data, and re-adding the stock later needs no re-download. A stock that is neither held nor watched by anyone simply drops out of the price sync scope, so its history stops growing until it is added again.
 
 **Success — `200 OK`**
 

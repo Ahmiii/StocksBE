@@ -37,22 +37,22 @@
     },
     {
       "key": "email",
-      "value": "ali@example.com",
+      "value": "ahmii.shaikh18@gmail.com",
       "type": "string"
     },
     {
       "key": "password",
-      "value": "secret123",
+      "value": "12345",
       "type": "string"
     },
     {
       "key": "brokerAccountNumber",
-      "value": "CC12345",
+      "value": "CC24944",
       "type": "string"
     },
     {
       "key": "brokerPassword",
-      "value": "",
+      "value": "Stock1234",
       "type": "string"
     },
     {
@@ -1224,7 +1224,7 @@
                 }
               ]
             },
-            "description": "Search `securities` by symbol or company name — the picker for adding to the watchlist. Database only; no broker session needed. Returns at most 20 rows.\n\nThe test script saves the first result's `id` into the `securityId` collection variable, ready for `Add to watchlist`.\n\n**Responses**\n- `200` `{ data: { securities: [ { id, symbol, companyName, sector } ] } }`\n- `400` `{ error: \"q must be at least 2 characters\" }`"
+            "description": "Search `securities` by symbol or company name — the picker for adding to the watchlist. Database only; no broker session needed. Returns at most 20 rows.\n\nStocks you currently **hold** and stocks **already on your watchlist** are excluded, so the picker only offers things you can add. The same query therefore returns different rows for different users.\n\nThe test script saves the first result's `id` into the `securityId` collection variable, ready for `Add to watchlist`.\n\n**Responses**\n- `200` `{ data: { securities: [ { id, symbol, companyName, sector } ] } }`\n- `400` `{ error: \"q must be at least 2 characters\" }`"
           },
           "event": [
             {
@@ -1468,7 +1468,7 @@
                 "{{securityId}}"
               ]
             },
-            "description": "Add a security to your watchlist. `securityId` is a `securities.id` — run `Search securities` first and it is set for you. Idempotent: adding the same one again returns `200` and changes nothing. No body.\n\n**Responses**\n- `200` `{ message: \"success\", data: { symbol } }`\n- `404` `{ error: \"security does not exist\" }`"
+            "description": "Add a security to your watchlist. `securityId` is a `securities.id` — run `Search securities` first and it is set for you. Idempotent: adding the same one again returns `200` and changes nothing. No body.\n\nIf the stock has no price history yet and a market session is alive (you synced in the last ~2 h), its full history is fetched in this request so it shows a price immediately — `pricesLoaded: true`. Otherwise it is inserted anyway with `pricesLoaded: false` and the next **Sync daily prices** fills it.\n\n**Responses**\n- `200` `{ message: \"success\", data: { symbol, pricesLoaded } }`\n- `404` `{ error: \"security does not exist\" }`"
           },
           "event": [
             {
@@ -1478,7 +1478,7 @@
                 "exec": [
                   "pm.test('Status is 200', () => pm.response.to.have.status(200));",
                   "const data = pm.response.json()?.data;",
-                  "if (data) console.log(`added ${data.symbol}`);"
+                  "if (data) console.log(`added ${data.symbol} — prices ${data.pricesLoaded ? 'loaded now' : 'will load on next sync'}`);"
                 ]
               }
             }
@@ -1509,7 +1509,7 @@
                   "value": "application/json; charset=utf-8"
                 }
               ],
-              "body": "{ \"message\": \"success\", \"data\": { \"symbol\": \"FFC\" } }"
+              "body": "{ \"message\": \"success\", \"data\": { \"symbol\": \"FFC\", \"pricesLoaded\": true } }"
             },
             {
               "name": "404 Unknown security",
@@ -1555,7 +1555,7 @@
                 "{{securityId}}"
               ]
             },
-            "description": "Remove a security from your watchlist. Scoped to you — an id that is not on your list is a `404`.\n\n**Responses**\n- `200` `{ message: \"success\" }`\n- `404` `{ error: \"not in watchlist\" }`"
+            "description": "Remove a security from your watchlist. Scoped to you — an id that is not on your list is a `404`.\n\nOnly the link row is deleted; the security and its price history stay in the database (they are shared, and re-adding needs no re-download).\n\n**Responses**\n- `200` `{ message: \"success\" }`\n- `404` `{ error: \"not in watchlist\" }`"
           },
           "event": [
             {

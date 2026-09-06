@@ -1,4 +1,6 @@
 import { prisma } from "../config/db.js";
+import { getMarketSession } from "../services/brokderSessionStore.js";
+import { fetchMarket, savePrices } from "./marketDataController.js";
 
 const BENCHMARK_SYMBOL = "KSE100";
 
@@ -68,7 +70,28 @@ const addToWatchlist = async (req, res) => {
     update: {},
   });
 
-  res.status(200).json({ message: "success", data: { symbol: security.symbol } });
+  // Pull the price history now if we can, so the stock does not show "—" until
+  // the next sync. Needs a live market session; if there is none, the next
+  // POST /market/sync/:id picks it up because watched symbols are in scope.
+  let pricesLoaded = (await prisma.dailyPrice.count({ where: { securityId: security.id } })) > 0;
+
+  if (!pricesLoaded) {
+    const accounts = await prisma.brokerAccount.findMany({
+      where: { userId: req.user.id },
+      select: { id: true },
+    });
+    const market = accounts.map((a) => getMarketSession(a.id)).find(Boolean);
+
+    if (market) {
+      const bars = await fetchMarket(`/daily/${security.symbol}`, market.cookieHeader);
+      pricesLoaded = (await savePrices(security.id, bars)) > 0;
+    }
+  }
+
+  res.status(200).json({
+    message: "success",
+    data: { symbol: security.symbol, pricesLoaded },
+  });
 };
 
 const removeFromWatchlist = async (req, res) => {
