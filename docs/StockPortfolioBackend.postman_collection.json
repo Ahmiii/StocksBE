@@ -107,9 +107,9 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('Status is 201', () => pm.response.to.have.status(201));",
-                  "const json = pm.response.json();",
-                  "if (json.token) {",
-                  "  pm.collectionVariables.set('token', json.token);",
+                  "const token = pm.response.json()?.data?.token;",
+                  "if (token) {",
+                  "  pm.collectionVariables.set('token', token);",
                   "  console.log('token saved');",
                   "}"
                 ]
@@ -151,7 +151,7 @@
                   "value": "application/json; charset=utf-8"
                 }
               ],
-              "body": "{\n  \"message\": \"success\",\n  \"data\": { \"id\": \"3f1c…\", \"fullName\": \"Ali Khan\" },\n  \"token\": \"eyJhbGciOi…\"\n}"
+              "body": "{\n  \"message\": \"success\",\n  \"data\": {\n    \"user\": { \"id\": \"3f1c…\", \"fullName\": \"Ali Khan\", \"email\": \"ali@example.com\" },\n    \"token\": \"eyJhbGciOi…\"\n  }\n}"
             },
             {
               "name": "400 user already exists",
@@ -187,7 +187,7 @@
                   "value": "application/json; charset=utf-8"
                 }
               ],
-              "body": "{ \"message\": \"user already exists\" }"
+              "body": "{ \"error\": \"user already exists\" }"
             }
           ]
         },
@@ -277,7 +277,7 @@
                   "value": "application/json; charset=utf-8"
                 }
               ],
-              "body": "{\n  \"status\": \"success\",\n  \"data\": {\n    \"user\": { \"id\": \"3f1c…\", \"fullName\": \"Ali Khan\", \"email\": \"ali@example.com\" },\n    \"token\": \"eyJhbGciOi…\"\n  }\n}"
+              "body": "{\n  \"message\": \"success\",\n  \"data\": {\n    \"user\": { \"id\": \"3f1c…\", \"fullName\": \"Ali Khan\", \"email\": \"ali@example.com\" },\n    \"token\": \"eyJhbGciOi…\"\n  }\n}"
             },
             {
               "name": "401 Invalid credentials",
@@ -313,7 +313,7 @@
                   "value": "application/json; charset=utf-8"
                 }
               ],
-              "body": "{ \"message\": \"Invalid email or passowrd\" }"
+              "body": "{ \"error\": \"Invalid email or password\" }"
             }
           ]
         }
@@ -926,6 +926,72 @@
                 }
               ],
               "body": "{\n  \"message\": \"success\",\n  \"data\": {\n    \"trades\": [\n      {\n        \"id\": \"e9f3…\",\n        \"portfolioId\": \"c47b…\",\n        \"side\": \"BUY\",\n        \"quantity\": \"500.0000\",\n        \"price\": \"102.5000\",\n        \"commission\": \"153.7500\",\n        \"netAmount\": \"51403.7500\",\n        \"executedAt\": \"2026-03-12T00:00:00.000Z\",\n        \"security\": { \"symbol\": \"FFC\", \"companyName\": \"FFC\" }\n      }\n    ],\n    \"pagination\": { \"total\": 87, \"limit\": 20, \"offset\": 40, \"hasMore\": true }\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Benchmark vs KSE100",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/portfolio/{{portfolioId}}/benchmark",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "portfolio",
+                "{{portfolioId}}",
+                "benchmark"
+              ]
+            },
+            "description": "The whole portfolio against KSE100, computed on read: same-cash shadow (`headline`), time-weighted lines starting at 100 (`series`), XIRR (`moneyWeighted`), the story split at Feb 2026 (`phases`) and each open position since its cost-weighted buy date (`positions`).\n\nNo query params — the app slices `series` per range and rebases at the slice's first point. Needs at least one synced trade and KSE100 prices (`POST /market/sync/:id`)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "const data = pm.response.json()?.data;",
+                  "pm.test('has every block', () => {",
+                  "  pm.expect(data).to.include.keys('asOf', 'window', 'headline', 'timeWeighted', 'moneyWeighted', 'phases', 'series', 'positions', 'dataNotes');",
+                  "  pm.expect(data.series[0].portfolio).to.eql(100);",
+                  "  pm.expect(data.series[0].benchmark).to.eql(100);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/portfolio/{{portfolioId}}/benchmark",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "portfolio",
+                    "{{portfolioId}}",
+                    "benchmark"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "body": "{\n  \"message\": \"success\",\n  \"data\": {\n    \"asOf\": \"2026-09-04\",\n    \"window\": {\n      \"from\": \"2024-07-29\",\n      \"to\": \"2026-09-04\",\n      \"tradingDays\": 525\n    },\n    \"headline\": {\n      \"netCashIn\": 4461909.97,\n      \"portfolio\": 5083415.94,\n      \"benchmark\": 5454803.26,\n      \"difference\": -371387.32,\n      \"portfolioReturnOnCash\": 13.93,\n      \"benchmarkReturnOnCash\": 22.25\n    },\n    \"timeWeighted\": {\n      \"portfolio\": 60.36,\n      \"benchmark\": 122.42,\n      \"alpha\": -62.06,\n      \"maxDrawdown\": {\n        \"portfolio\": -23.62,\n        \"benchmark\": -22.57\n      }\n    },\n    \"moneyWeighted\": {\n      \"portfolioXirr\": 18.6,\n      \"benchmarkXirr\": 29.52\n    },\n    \"phases\": [\n      {\n        \"from\": \"2024-07-29\",\n        \"to\": \"2026-02-02\",\n        \"portfolio\": 66.41,\n        \"benchmark\": 134.76,\n        \"netCashInAtEnd\": 1999631.62\n      },\n      {\n        \"from\": \"2026-02-02\",\n        \"to\": \"2026-09-04\",\n        \"portfolio\": -3.64,\n        \"benchmark\": -5.26,\n        \"netCashInAtEnd\": 4461909.97\n      }\n    ],\n    \"series\": [\n      {\n        \"date\": \"2024-07-29\",\n        \"portfolio\": 100,\n        \"benchmark\": 100,\n        \"value\": 17669.62,\n        \"netCashIn\": 20027.61\n      },\n      {\n        \"date\": \"2026-09-04\",\n        \"portfolio\": 160.36,\n        \"benchmark\": 222.42,\n        \"value\": 5083415.94,\n        \"netCashIn\": 4461909.97\n      }\n    ],\n    \"positions\": [\n      {\n        \"symbol\": \"FFC\",\n        \"quantity\": 2270,\n        \"avgCost\": 499.41,\n        \"lastPrice\": 548.11,\n        \"buyDate\": \"2026-01-05\",\n        \"stockReturn\": 9.75,\n        \"benchmarkReturn\": -3.88,\n        \"alpha\": 13.63,\n        \"costBasis\": 1133660.7,\n        \"weight\": 24.15\n      }\n    ],\n    \"dataNotes\": {\n      \"adjustedSplits\": [\n        {\n          \"symbol\": \"BAFL\",\n          \"ratio\": 2,\n          \"lastPreSplitTrade\": \"2024-07-29\"\n        },\n        {\n          \"symbol\": \"SYS\",\n          \"ratio\": 5,\n          \"lastPreSplitTrade\": \"2025-05-07\"\n        }\n      ],\n      \"dividendsIncluded\": false\n    }\n  }\n}"
             }
           ]
         }

@@ -10,7 +10,7 @@ const register = async (req, res) => {
   });
   if (userExists) {
     return res?.status(400)?.json({
-      message: "user already exists",
+      error: "user already exists",
     });
   }
 
@@ -33,10 +33,9 @@ const register = async (req, res) => {
   res?.status(201)?.json({
     message: "success",
     data: {
-      id: user?.id,
-      fullName: user?.fullName,
+      user: { id: user?.id, fullName: user?.fullName, email: user?.email },
+      token,
     },
-    token,
   });
 };
 
@@ -50,13 +49,13 @@ const login = async (req, res) => {
 
   if (!user) {
     return res?.status(401)?.json({
-      message: "Invalid email or passowrd",
+      error: "Invalid email or password",
     });
   }
   const passwordValid = await bcrypt?.compare(password, user?.passwordHash);
   if (!passwordValid) {
     return res?.status(401)?.json({
-      message: "Invalid email or passowrd",
+      error: "Invalid email or password",
     });
   }
 
@@ -69,7 +68,7 @@ const login = async (req, res) => {
   );
 
   res?.status(200)?.json({
-    status: "success",
+    message: "success",
     data: {
       user: {
         id: user?.id,

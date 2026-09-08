@@ -152,7 +152,7 @@ Backend/
 │   ├── controllers/
 │   │   ├── authController.js    # register, login
 │   │   ├── brokerAccountController.js # link broker, list, disconnect, sync trades
-│   │   ├── portfolioController.js # portfolio list, positions, trades
+│   │   ├── portfolioController.js # portfolio list, positions, trades, benchmark vs KSE100
 │   │   ├── marketDataController.js # price sync, securities import + search, trend chart
 │   │   └── watchlistController.js # watchlist list / add / remove
 │   ├── services/
@@ -161,6 +161,7 @@ Backend/
 │   │   ├── extractAHLInfor.js   # Parses broker HTML/cookies, builds login form body
 │   │   ├── tradeData.js         # Normalises trades, calculates/merges/reconciles positions
 │   │   ├── dateRange.js         # Parses ?from=&to= (shared by positions and price history)
+│   │   ├── benchmark.js         # Split detection, daily walk (TWR + KSE100 shadow), XIRR, per-stock alpha
 │   │   ├── generateToken.js     # Signs the JWT and sets a cookie
 │   │   └── test.js              # Old experiment script — NOT used by the server (see section 14)
 │   └── generated/prisma/        # Generated Prisma client (git-ignored)
@@ -456,6 +457,7 @@ Every protected endpoint filters by `req.user.id`. A user can only see or change
 | 15 | GET | `/watchlist` | 🔒 | My watchlist with last price and day change; `KSE100` on top |
 | 16 | POST | `/watchlist/:securityId` | 🔒 | Add a security to my watchlist |
 | 17 | DELETE | `/watchlist/:securityId` | 🔒 | Remove a security from my watchlist |
+| 18 | GET | `/portfolio/:id/benchmark` | 🔒 | Portfolio vs `KSE100`: same-cash shadow, time-weighted chart, XIRR, per-stock alpha |
 
 ---
 
@@ -482,8 +484,10 @@ Creates a new user and returns a login token.
 ```json
 {
   "message": "success",
-  "data": { "id": "3f1c…", "fullName": "Ali Khan" },
-  "token": "eyJhbGciOi…"
+  "data": {
+    "user": { "id": "3f1c…", "fullName": "Ali Khan", "email": "ali@example.com" },
+    "token": "eyJhbGciOi…"
+  }
 }
 ```
 
@@ -491,7 +495,7 @@ Creates a new user and returns a login token.
 
 | Status | Body | When |
 |---|---|---|
-| 400 | `{ "message": "user already exists" }` | Email is already registered. |
+| 400 | `{ "error": "user already exists" }` | Email is already registered. |
 | 500 | HTML error page | A required field is missing (no validation yet — see section 14). |
 
 ---
@@ -508,7 +512,7 @@ Creates a new user and returns a login token.
 
 ```json
 {
-  "status": "success",
+  "message": "success",
   "data": {
     "user": { "id": "3f1c…", "fullName": "Ali Khan", "email": "ali@example.com" },
     "token": "eyJhbGciOi…"
@@ -520,9 +524,9 @@ Creates a new user and returns a login token.
 
 | Status | Body | When |
 |---|---|---|
-| 401 | `{ "message": "Invalid email or passowrd" }` | Email not found or password wrong (same message for both, on purpose). |
+| 401 | `{ "error": "Invalid email or password" }` | Email not found or password wrong (same message for both, on purpose). |
 
-> The response shape of register and login is slightly different (`message` vs `status`, and where `token` sits). Frontend code should handle both.
+> Register and login return the same shape, so a client can treat them alike.
 
 ---
 
@@ -848,6 +852,81 @@ Example: `GET /portfolio/c47b…/trades?limit=20&offset=40`
 ```
 
 > **Note:** unlike the positions endpoint, `quantity`, `price`, `commission` and `netAmount` here come back as **strings** (Prisma `Decimal`). Convert with `Number()` on the client.
+
+---
+
+#### 18. `GET /portfolio/:id/benchmark` 🔒
+
+The whole portfolio against `KSE100`, computed on read from `trades` and `daily_prices` (about 160 ms for two years of history). No query params: the response is the full history since the first trade, and the app slices it per range and rebases at the slice's first point.
+
+**Path params:** `id` — portfolio UUID. Must belong to the caller.
+
+**Success — `200 OK`** (series and positions abbreviated)
+
+```json
+{
+  "message": "success",
+  "data": {
+    "asOf": "2026-09-04",
+    "window": { "from": "2024-07-29", "to": "2026-09-04", "tradingDays": 525 },
+    "headline": {
+      "netCashIn": 4461909.97,
+      "portfolio": 5083415.94,
+      "benchmark": 5454803.26,
+      "difference": -371387.32,
+      "portfolioReturnOnCash": 13.93,
+      "benchmarkReturnOnCash": 22.25
+    },
+    "timeWeighted": {
+      "portfolio": 60.36, "benchmark": 122.42, "alpha": -62.06,
+      "maxDrawdown": { "portfolio": -23.62, "benchmark": -22.57 }
+    },
+    "moneyWeighted": { "portfolioXirr": 18.6, "benchmarkXirr": 29.52 },
+    "phases": [
+      { "from": "2024-07-29", "to": "2026-02-02", "portfolio": 66.41, "benchmark": 134.76, "netCashInAtEnd": 1999631.62 },
+      { "from": "2026-02-02", "to": "2026-09-04", "portfolio": -3.64, "benchmark": -5.26, "netCashInAtEnd": 4461909.97 }
+    ],
+    "series": [
+      { "date": "2024-07-29", "portfolio": 100, "benchmark": 100, "value": 17669.62, "netCashIn": 20027.61 },
+      { "date": "2026-09-04", "portfolio": 160.36, "benchmark": 222.42, "value": 5083415.94, "netCashIn": 4461909.97 }
+    ],
+    "positions": [
+      { "symbol": "FFC", "quantity": 2270, "avgCost": 499.41, "lastPrice": 548.11,
+        "buyDate": "2026-01-05", "stockReturn": 9.75, "benchmarkReturn": -3.88,
+        "alpha": 13.63, "costBasis": 1133660.7, "weight": 24.15 }
+    ],
+    "dataNotes": {
+      "adjustedSplits": [
+        { "symbol": "BAFL", "ratio": 2, "lastPreSplitTrade": "2024-07-29" },
+        { "symbol": "SYS", "ratio": 5, "lastPreSplitTrade": "2025-05-07" }
+      ],
+      "dividendsIncluded": false
+    }
+  }
+}
+```
+
+**Field guide**
+
+| Field | Meaning |
+|---|---|
+| `headline` | Every rupee spent on a buy bought `KSE100` units at that day's level, every sell redeemed them; `benchmark` is those units at today's level. `portfolio` is `Σ quantity × lastPrice`. Deposits cannot distort this. |
+| `timeWeighted` | Both lines start at 100 on the first trade. Each day values yesterday's holdings at today's prices, chains the change, *then* applies the day's trades — so money added never moves the line. Slice and rebase on the client for any shorter window. |
+| `moneyWeighted` | XIRR (annualised) of the actual cash flows, with today's value as the final inflow; `benchmarkXirr` uses the shadow value instead. |
+| `phases` | The time-weighted return split at 2026-02-01 — the sentence that explains the chart. One phase if every trade is after the cut. |
+| `series` | One point per trading day (union of `KSE100` bar dates and trade dates). |
+| `positions` | Open positions only, sorted by `costBasis` desc. `buyDate` is the cost-weighted average of the buys, moved to the next trading day; `benchmarkReturn` is `KSE100` over `buyDate → asOf`. |
+| `dataNotes.adjustedSplits` | The stored price history is already divided for past splits; a trade priced far above that day's stored close reveals one. Pre-split trade quantities are multiplied by `ratio` when valuing holdings. |
+
+The maths, the verification against the live data, and the roadmap (corporate actions table, extra screens) are in [`BENCHMARK_ANALYTICS.md`](BENCHMARK_ANALYTICS.md).
+
+**Errors**
+
+| Status | Body | When |
+|---|---|---|
+| 404 | `{ "error": "Portfolio not found." }` | Unknown id, or not your portfolio. |
+| 400 | `{ "error": "No trades to benchmark." }` | The portfolio has never been synced. |
+| 400 | `{ "error": "KSE100 prices not synced yet." }` | Run `POST /market/sync/:id` first. |
 
 ---
 
@@ -1315,7 +1394,7 @@ Most endpoints return:
 { "message": "success", "data": { … } }
 ```
 
-Exceptions: `POST /auth/login` uses `"status": "success"`; `POST /broker/accounts` returns only `{ "data": … }`; disconnect uses a different `message` text.
+Exceptions: `POST /broker/accounts` returns only `{ "data": … }`; disconnect uses a different `message` text.
 
 **Errors that the code handles**
 
@@ -1323,7 +1402,7 @@ Exceptions: `POST /auth/login` uses `"status": "success"`; `POST /broker/account
 { "error": "human readable message" }
 ```
 
-Auth endpoints use `{ "message": "…" }` instead of `error`.
+Every endpoint, auth included, uses this shape. Clients can read `error` and show it as is.
 
 **Status codes used**
 
@@ -1369,7 +1448,7 @@ These are facts about the code as it is today. They are listed so nobody is surp
 
 **API design**
 
-16. Response shapes are not fully consistent (`message` vs `status`, `error` vs `message`, `token` location). See section 13.
+16. ~~Response shapes are not fully consistent (`message` vs `status`, `error` vs `message`, `token` location).~~ Fixed for auth: register and login now return `{ "message": "success", "data": { "user", "token" } }` and errors as `{ "error" }`. `POST /broker/accounts` still returns only `{ "data": … }`. See section 13.
 17. `GET /portfolio/:id/positions` and `/trades` return an empty list (200) for a portfolio that is not yours, instead of 404.
 18. The env variable is named `JWR_EXPIRES_IN` (typo). Renaming it means changing both `.env` and `generateToken.js`.
 19. `GET /market/trend/:symbol` has no `1D` period. Intraday charts need the minute feed (`/intraday/<SYMBOL>/1D` on the analytics API), which is not stored — `daily_prices` is one row per day.
