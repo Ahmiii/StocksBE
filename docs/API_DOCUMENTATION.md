@@ -122,6 +122,7 @@ All variables live in `.env` (which is git-ignored — never commit it).
 | `BROKER_URL` | Yes | — | Base URL of the broker website, e.g. `https://web.ahletrade.com`. |
 | `BROKER_HOUSE_NAME` | No | `AHL` | Value of the `HouseName` cookie the broker expects. |
 | `DASHBOARD_URL` | Yes (for market sync) | — | Base URL of the Arif Habib analytics API used for daily prices. |
+| `CREDENTIALS_KEY` | No (needed for the nightly sync) | — | 64 hex characters (32 bytes). Encrypts the broker password stored on link so the nightly sync can log in unattended. Without it nothing is stored and the job is off. Generate with `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`. |
 | `DASHBOARD_COOKIE` | No | — | Manual fallback: a `laravel_session` cookie copied from a browser. Used only when there is no live broker session. Handy for backfilling prices outside trading hours. |
 | `PORT` | No | `5001` | Port the server listens on. |
 | `NODE_ENV` | No | — | If set to anything, the `jwt` cookie is marked `secure`. |
@@ -458,6 +459,7 @@ Every protected endpoint filters by `req.user.id`. A user can only see or change
 | 16 | POST | `/watchlist/:securityId` | 🔒 | Add a security to my watchlist |
 | 17 | DELETE | `/watchlist/:securityId` | 🔒 | Remove a security from my watchlist |
 | 18 | GET | `/portfolio/:id/benchmark` | 🔒 | Portfolio vs `KSE100`: same-cash shadow, time-weighted chart, XIRR, per-stock alpha |
+| 19 | POST | `/broker/accounts/:id/full-sync` | 🔒 | The nightly routine on demand: log in with the stored password, then trades + prices |
 
 ---
 
@@ -495,8 +497,10 @@ Creates a new user and returns a login token.
 
 | Status | Body | When |
 |---|---|---|
+| 400 | `{ "error": "email, password and fullName are required." }` | A field is missing. |
+| 400 | `{ "error": "email is not valid." }` | Not an email address. |
+| 400 | `{ "error": "password must be at least 6 characters." }` | Too short. |
 | 400 | `{ "error": "user already exists" }` | Email is already registered. |
-| 500 | HTML error page | A required field is missing (no validation yet — see section 14). |
 
 ---
 
@@ -524,6 +528,7 @@ Creates a new user and returns a login token.
 
 | Status | Body | When |
 |---|---|---|
+| 400 | `{ "error": "email and password are required." }` | A field is missing. |
 | 401 | `{ "error": "Invalid email or password" }` | Email not found or password wrong (same message for both, on purpose). |
 
 > Register and login return the same shape, so a client can treat them alike.
@@ -538,9 +543,8 @@ Links an AHL eTrade account to the logged-in user. The server logs in to the bro
 
 - creates (or re-activates) a `broker_accounts` row,
 - creates a `portfolios` row named `AHL <accountNumber>` if one does not exist,
-- keeps the broker session cookies **in memory for 15 minutes** so the next sync call can reuse them.
-
-The broker password is **not saved** anywhere.
+- keeps the broker session cookies **in memory for 15 minutes** so the next sync call can reuse them,
+- stores the broker password **encrypted** (AES-256-GCM with `CREDENTIALS_KEY`) so the nightly sync can log in without you. When `CREDENTIALS_KEY` is not set, nothing is stored.
 
 **Request body**
 
@@ -557,18 +561,10 @@ The broker password is **not saved** anywhere.
 
 ```json
 {
-  "data": {
-    "brokerAccountId": "8a2e…",
-    "portfolioId": "c47b…",
-    "status": 302,
-    "sessionCookie": ".AspNetCore.Session=CfDJ8…",
-    "cookies": { ".AspNetCore.Session": "CfDJ8…", "trader": "CC12345", "HouseName": "AHL" },
-    "enabledDigits": [1, 4, 7]
-  }
+  "message": "success",
+  "data": { "brokerAccountId": "8a2e…", "portfolioId": "c47b…" }
 }
 ```
-
-`brokerAccountId` and `portfolioId` are the values the client needs for later calls. `status`, `sessionCookie`, `cookies` and `enabledDigits` are debug information from the broker login (see section 14 about removing them).
 
 **Errors**
 
@@ -697,6 +693,29 @@ Example: `POST /broker/accounts/8a2e…/sync?from=2024-01-01&to=2024-12-31`
 |---|---|---|
 | 401 | `{ "error": "Broker session expired. Reconnect the account to continue." }` | No live session, or the broker answered with its login page instead of data. |
 | 404 | `{ "error": "account does not exist" }` | Not found / not yours. |
+
+---
+
+#### 19. `POST /broker/accounts/:id/full-sync` 🔒
+
+Runs the nightly routine for one account right now (section 10.6): log in to the broker with the stored password, pull trades and holdings, rebuild positions, then fetch missing price bars. Use it to test the job or to refresh after market hours without waiting for 17:30.
+
+**Success — `200 OK`**
+
+```json
+{
+  "message": "success",
+  "data": { "trades": 255, "positions": 24, "newPriceRows": 21 }
+}
+```
+
+**Errors**
+
+| Status | Body | When |
+|---|---|---|
+| 404 | `{ "error": "account does not exist" }` | Unknown id or not your account. |
+| 400 | `{ "error": "No stored password for this account. Link it again to enable sync." }` | The account was linked before `CREDENTIALS_KEY` existed, or was disconnected. |
+| 502 | `{ "error": "Invalid broker credentials." }` (or another broker message) | The broker login or history call failed. `syncStatus` becomes `error`. |
 
 ---
 
@@ -1325,6 +1344,20 @@ If the market API answers `401` mid-run, the cached cookie is thrown away so the
 
 ---
 
+### 10.6 Nightly sync
+
+`src/jobs/dailySync.js`, started from `server.js`. On weekdays at **17:30 Asia/Karachi** (`SYNC_SCHEDULE` in `constants.js`) it takes every broker account that has a stored password and is not disconnected, and for each one:
+
+1. `brokerLogin` with the decrypted password (`src/utils/secrets.js`, AES-256-GCM, key from `CREDENTIALS_KEY`);
+2. `syncAccount` — the same code as `POST /broker/accounts/:id/sync`: trades, holdings, positions, today's close from `mtmPrice`;
+3. `syncPricesForAccount` — the same code as `POST /market/sync/:id`: missing daily bars for held + watched symbols and `KSE100`.
+
+`syncStatus` on the account is `syncing` while it runs, `idle` on success (with `lastSyncedAt`), `error` on failure; failures are logged to the console and the next account still runs. The app's Portfolio header shows this as "Synced 8 Sep, 17:32" / "Last sync failed". `POST /broker/accounts/:id/full-sync` runs the same routine on demand.
+
+### 10.7 Token endpoints on the analytics API
+
+Some dashboard endpoints (`company-statement` for fundamentals, `payouts/*`, `news/*`) need a **bearer token as well as the cookie**. Every dashboard page embeds a fresh token in `<meta name="access-token">`, and the previous one stops working. `fetchDashboardApi(path, params, account)` in `marketDataController.js` loads one page per market session to read it, caches it next to the cookie, and on a 401 (a browser tab rotated it) fetches a new one and retries once. Nothing uses it yet; fundamentals are next on the roadmap.
+
 ## 11. How positions are calculated
 
 `calculatePositions` in `tradeData.js` walks every trade of a portfolio **oldest first**, grouped by stock, and keeps three running numbers:
@@ -1394,7 +1427,7 @@ Most endpoints return:
 { "message": "success", "data": { … } }
 ```
 
-Exceptions: `POST /broker/accounts` returns only `{ "data": … }`; disconnect uses a different `message` text.
+The only exception: disconnect uses a different `message` text.
 
 **Errors that the code handles**
 
@@ -1424,15 +1457,15 @@ These are facts about the code as it is today. They are listed so nobody is surp
 
 **Security**
 
-1. `POST /broker/accounts` returns the broker's `sessionCookie` and full `cookies` to the client. The client does not need them; they should be removed from the response.
-2. `src/utils/test.js` is an old experiment (it references an `app` that is never defined, so it cannot run). It contains **hard-coded fallback broker credentials** and is committed to git. It should be deleted or moved out of the repo.
+1. ~~`POST /broker/accounts` returns the broker's `sessionCookie` and full `cookies` to the client.~~ Fixed: the response is now only `brokerAccountId` and `portfolioId`.
+2. ~~`src/utils/test.js` contains hard-coded broker credentials and is committed to git.~~ Deleted. Note the credentials remain in git history; change the broker password if that matters.
 3. No CORS, `helmet`, or rate limiting is configured. Login and register have no brute-force protection.
 4. The `jwt` cookie set by `generateToken.js` has `secure: process.env.NODE_ENV` (a string, not a boolean) and `maxAge: 100*60*60*25*7` = 63,000,000 ms ≈ **17.5 hours**, not 7 days. The cookie is not read by the server anyway (no `cookie-parser`), so only the `Authorization` header works.
 
 **Robustness**
 
-5. No input validation on `/auth/register` and `/auth/login`. A missing `email` or `password` causes a crash inside Prisma/bcrypt → HTML 500 page.
-6. No global Express error handler → unexpected errors return HTML, not JSON.
+5. ~~No input validation on `/auth/register` and `/auth/login`.~~ Fixed: missing fields, a bad email, or a password under 6 characters return `400 { "error" }`.
+6. ~~No global Express error handler → unexpected errors return HTML, not JSON.~~ Fixed: unknown routes return `404 { "error" }` and thrown errors `500 { "error": "Something went wrong." }`, logged to the console.
 7. `PATCH …/disconnect` does not clear the in-memory broker session, so `sync` keeps working for up to 15 minutes after "disconnect".
 8. Broker sessions live only in memory (see section 12): lost on restart, not shared across instances.
 9. `POST /market/sync/:id` processes symbols one at a time inside a single HTTP request. It is now scoped to held + watched symbols (~20) with a 400 ms pause, so about 8 seconds — acceptable, but a background job would still be better if the watchlist grows large.

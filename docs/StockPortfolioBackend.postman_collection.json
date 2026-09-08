@@ -406,7 +406,7 @@
                   "value": "application/json; charset=utf-8"
                 }
               ],
-              "body": "{\n  \"data\": {\n    \"brokerAccountId\": \"8a2e…\",\n    \"portfolioId\": \"c47b…\",\n    \"status\": 302,\n    \"sessionCookie\": \".AspNetCore.Session=CfDJ8…\",\n    \"cookies\": { \".AspNetCore.Session\": \"CfDJ8…\", \"trader\": \"CC12345\", \"HouseName\": \"AHL\" },\n    \"enabledDigits\": [1, 4, 7]\n  }\n}"
+              "body": "{\n  \"message\": \"success\",\n  \"data\": {\n    \"brokerAccountId\": \"8a2e…\",\n    \"portfolioId\": \"c47b…\"\n  }\n}"
             },
             {
               "name": "401 Invalid broker credentials",
@@ -691,6 +691,69 @@
                 }
               ],
               "body": "{\n  \"message\": \"account disconnected successfully\",\n  \"data\": { \"account\": { \"id\": \"8a2e…\", \"clientCode\": \"CC12345\", \"syncStatus\": \"disconnected\" } }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Full sync now (stored password)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/broker/accounts/{{brokerAccountId}}/full-sync",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "broker",
+                "accounts",
+                "{{brokerAccountId}}",
+                "full-sync"
+              ]
+            },
+            "description": "Runs the nightly routine for this account right now: broker login with the stored password, trades + holdings, then missing price bars. Needs CREDENTIALS_KEY on the server and an account linked after it was set."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('has counts', () => pm.expect(pm.response.json().data).to.include.keys('trades', 'positions', 'newPriceRows'));"
+                ]
+              }
+            }
+          ],
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/broker/accounts/{{brokerAccountId}}/full-sync",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "broker",
+                    "accounts",
+                    "{{brokerAccountId}}",
+                    "full-sync"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "body": "{\n  \"message\": \"success\",\n  \"data\": {\n    \"trades\": 255,\n    \"positions\": 24,\n    \"newPriceRows\": 21\n  }\n}"
             }
           ]
         }

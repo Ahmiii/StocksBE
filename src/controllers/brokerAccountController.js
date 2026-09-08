@@ -32,6 +32,7 @@ import {
   reconcilePositions,
   normalizeTradeRows,
 } from "../utils/tradeData.js";
+import { canStoreSecrets, encrypt } from "../utils/secrets.js";
 // Never follow redirects: a 302 would drop the Set-Cookie headers we need off
 // the hop that issued them, and the login POST answers with one on success.
 const NO_REDIRECT = {
@@ -174,33 +175,34 @@ const fetchColletralHistory = async ({ clientCode, session }) => {
   }
 };
 
-const getAHLSession = async (req, res) => {
-  const { accountNumber, password } = req.body ?? {};
-
-  if (!accountNumber || !password) {
-    return res.status(400).json({
-      error: "accountNumber and password are required.",
-    });
-  }
-
+// Logs in to the broker. Returns the session on success, otherwise the HTTP
+// status and message the caller should answer with. Shared by the link
+// endpoint and the nightly sync.
+const brokerLogin = async ({ accountNumber, password }) => {
   const loginPage = await fetchLoginPage();
 
   if (!loginPage.sessionCookie) {
-    return res.status(502).json({
+    return {
+      ok: false,
+      status: 502,
       error: "No session cookie was returned by the broker login page.",
-    });
+    };
   }
   if (loginPage.enabledDigits.length === 0) {
-    return res.status(502).json({
+    return {
+      ok: false,
+      status: 502,
       error: "No enabled Digit fields were found in the broker login page.",
-    });
+    };
   }
 
   const lastDigit = Math.max(...loginPage.enabledDigits);
   if (password.length < lastDigit) {
-    return res.status(400).json({
+    return {
+      ok: false,
+      status: 400,
       error: `Password is too short: the broker asked for character ${lastDigit}.`,
-    });
+    };
   }
 
   const login = await submitLogin({
@@ -211,10 +213,33 @@ const getAHLSession = async (req, res) => {
   });
 
   if (isInvalidLogin(login.html)) {
-    return res.status(401).json({
-      error: "Invalid broker credentials.",
+    return { ok: false, status: 401, error: "Invalid broker credentials." };
+  }
+
+  return {
+    ok: true,
+    sessionCookie: login.sessionCookie,
+    cookieJar: { ...loginPage.cookieJar, ...login.cookieJar },
+  };
+};
+
+const getAHLSession = async (req, res) => {
+  const { accountNumber, password } = req.body ?? {};
+
+  if (!accountNumber || !password) {
+    return res.status(400).json({
+      error: "accountNumber and password are required.",
     });
   }
+
+  const login = await brokerLogin({ accountNumber, password });
+  if (!login.ok) {
+    return res.status(login.status).json({ error: login.error });
+  }
+
+  // Kept encrypted so the nightly sync can log in without you. Null when
+  // CREDENTIALS_KEY is not set, and the account is then skipped by the sync.
+  const credentialsEnc = canStoreSecrets() ? encrypt(password) : null;
 
   const brokerAccount = await prisma.brokerAccount.upsert({
     where: {
@@ -224,8 +249,8 @@ const getAHLSession = async (req, res) => {
         clientCode: accountNumber,
       },
     },
-    create: { userId: req.user.id, clientCode: accountNumber },
-    update: { syncStatus: SYNC_STATUS.IDLE },
+    create: { userId: req.user.id, clientCode: accountNumber, credentialsEnc },
+    update: { syncStatus: SYNC_STATUS.IDLE, credentialsEnc },
   });
 
   const portfolio = await prisma.portfolio.upsert({
@@ -240,17 +265,14 @@ const getAHLSession = async (req, res) => {
 
   saveSession(brokerAccount.id, {
     sessionCookie: login.sessionCookie,
-    cookieJar: { ...loginPage.cookieJar, ...login.cookieJar },
+    cookieJar: login.cookieJar,
   });
 
   res.status(200).json({
+    message: "success",
     data: {
       brokerAccountId: brokerAccount.id,
       portfolioId: portfolio.id,
-      status: login.status,
-      sessionCookie: login.sessionCookie,
-      cookies: { ...loginPage.cookieJar, ...login.cookieJar },
-      enabledDigits: loginPage.enabledDigits,
     },
   });
 };
@@ -301,34 +323,19 @@ const disconnectAccount = async (req, res) => {
   }
 };
 
-// Reads the broker's order history for one linked account. This does not log
-// in — it replays the cached session, so an expired one is a 401 telling the
-// client to reconnect.
-const getHistory = async (req, res) => {
-  const account = await prisma.brokerAccount.findFirst({
-    where: { id: req.params.id, userId: req.user.id },
-    select: { id: true, clientCode: true },
-  });
+// The broker's history query for one account; `query` can narrow the range.
+const historyParams = (clientCode, query = {}) => ({
+  account: clientCode,
+  fromdate: query.from?.toString() || HISTORY_DEFAULT_FROM,
+  todate: query.to?.toString() || new Date().toISOString().slice(0, 10),
+  type: query.type?.toString() || "ALL",
+  scrip: query.scrip?.toString() || "ALL",
+});
 
-  if (!account) {
-    return res.status(404).json({ error: "account does not exist" });
-  }
-
-  const session = getSession(account.id);
-  if (!session) {
-    return res.status(401).json({
-      error: "Broker session expired. Reconnect the account to continue.",
-    });
-  }
-
-  const params = {
-    account: account.clientCode,
-    fromdate: req.query.from?.toString() || HISTORY_DEFAULT_FROM,
-    todate: req.query.to?.toString() || new Date().toISOString().slice(0, 10),
-    type: req.query.type?.toString() || "ALL",
-    scrip: req.query.scrip?.toString() || "ALL",
-  };
-
+// Pulls trades and holdings from the broker with an existing session, saves
+// them, and rebuilds positions. Shared by the history endpoint and the
+// nightly sync. Returns { ok: false, status, error } when the session is dead.
+const syncAccount = async ({ account, session, params }) => {
   const history = await fetchOrderHistory({
     clientCode: account.clientCode,
     session,
@@ -344,9 +351,11 @@ const getHistory = async (req, res) => {
   // early. Drop it so the next request does not reuse a known-dead jar.
   if (!history.isJson) {
     clearSession(account.id);
-    return res.status(401).json({
+    return {
+      ok: false,
+      status: 401,
       error: "Broker session expired. Reconnect the account to continue.",
-    });
+    };
   }
 
   // Collaterals is an enhancement, not a requirement — a bad response there
@@ -491,8 +500,8 @@ const getHistory = async (req, res) => {
     );
   await prisma.$transaction(priceUpsert);
 
-  res.status(200).json({
-    message: "success",
+  return {
+    ok: true,
     data: {
       securities: securityRes.length,
       trades: tradesRes.length,
@@ -504,7 +513,47 @@ const getHistory = async (req, res) => {
       from: params.fromdate,
       to: params.todate,
     },
-  });
+  };
 };
 
-export { getAHLSession, getAccounts, disconnectAccount, getHistory };
+// Reads the broker's order history for one linked account. This does not log
+// in — it replays the cached session, so an expired one is a 401 telling the
+// client to reconnect.
+const getHistory = async (req, res) => {
+  const account = await prisma.brokerAccount.findFirst({
+    where: { id: req.params.id, userId: req.user.id },
+    select: { id: true, clientCode: true },
+  });
+
+  if (!account) {
+    return res.status(404).json({ error: "account does not exist" });
+  }
+
+  const session = getSession(account.id);
+  if (!session) {
+    return res.status(401).json({
+      error: "Broker session expired. Reconnect the account to continue.",
+    });
+  }
+
+  const result = await syncAccount({
+    account,
+    session,
+    params: historyParams(account.clientCode, req.query),
+  });
+  if (!result.ok) {
+    return res.status(result.status).json({ error: result.error });
+  }
+
+  res.status(200).json({ message: "success", data: result.data });
+};
+
+export {
+  brokerLogin,
+  historyParams,
+  syncAccount,
+  getAHLSession,
+  getAccounts,
+  disconnectAccount,
+  getHistory,
+};

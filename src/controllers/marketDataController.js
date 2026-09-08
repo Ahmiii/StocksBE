@@ -182,25 +182,14 @@ const savePrices = async (securityId, bars) => {
 // Pulls ~5 years of daily bars for every security we know about, plus the
 // benchmark. Safe to run repeatedly: the first run backfills, later runs only
 // add the days that have appeared since.
-const syncPrices = async (req, res) => {
-  const account = await prisma.brokerAccount.findFirst({
-    where: { id: req.params.id, userId: req.user.id },
-    select: { id: true, clientCode: true },
+// Fetches the missing daily bars for everything held or watched, plus the
+// benchmark. Shared by the sync endpoint and the nightly job. Throws when no
+// market session can be issued.
+const syncPricesForAccount = async (account) => {
+  const cookieHeader = await getMarketCookie({
+    brokerAccountId: account.id,
+    clientCode: account.clientCode,
   });
-
-  if (!account) {
-    return res.status(404).json({ error: "account does not exist" });
-  }
-
-  let cookieHeader;
-  try {
-    cookieHeader = await getMarketCookie({
-      brokerAccountId: account.id,
-      clientCode: account.clientCode,
-    });
-  } catch (error) {
-    return res.status(401).json({ error: error.message });
-  }
 
   await prisma.security.upsert({
     where: { symbol: BENCHMARK_SYMBOL },
@@ -259,16 +248,100 @@ const syncPrices = async (req, res) => {
     await new Promise((resolve) => setTimeout(resolve, 400));
   }
 
-  res.status(200).json({
-    message: "success",
-    data: {
-      securities: results.length,
-      fetched: results.filter((r) => r.fetched != null).length,
-      skipped: results.filter((r) => r.skipped).length,
-      newRows: results.reduce((sum, r) => sum + (r.saved ?? 0), 0),
-      results,
-    },
+  return {
+    securities: results.length,
+    fetched: results.filter((r) => r.fetched != null).length,
+    skipped: results.filter((r) => r.skipped).length,
+    newRows: results.reduce((sum, r) => sum + (r.saved ?? 0), 0),
+    results,
+  };
+};
+
+const syncPrices = async (req, res) => {
+  const account = await prisma.brokerAccount.findFirst({
+    where: { id: req.params.id, userId: req.user.id },
+    select: { id: true, clientCode: true },
   });
+
+  if (!account) {
+    return res.status(404).json({ error: "account does not exist" });
+  }
+
+  let data;
+  try {
+    data = await syncPricesForAccount(account);
+  } catch (error) {
+    return res.status(401).json({ error: error.message });
+  }
+
+  res.status(200).json({ message: "success", data });
+};
+
+/* -------------------------------------------------------------------------- */
+/* Token endpoints                                                            */
+/*                                                                            */
+/* Some dashboard endpoints (fundamentals, payouts, news) want a bearer token  */
+/* as well as the cookie. Every dashboard page embeds a fresh one in           */
+/* <meta name="access-token">, and the previous token stops working — so it is */
+/* fetched once per market session and refreshed once on a 401.               */
+/* -------------------------------------------------------------------------- */
+
+// The dashboard's page host; the API lives under /api/v3 of the same host.
+const DASHBOARD_HOME = DASHBOARD_URL ? new URL(DASHBOARD_URL).origin : "";
+
+const fetchAccessToken = async (cookieHeader) => {
+  const response = await axios.get(`${DASHBOARD_HOME}/`, {
+    headers: { ...BROWSER_HEADERS, ...NAVIGATION_HEADERS, cookie: cookieHeader },
+    responseType: "text",
+    transformResponse: [(data) => data],
+  });
+  const match = String(response.data).match(/name="access-token" content="([^"]+)"/);
+  return match ? match[1] : null;
+};
+
+const getMarketAuth = async ({ brokerAccountId, clientCode }) => {
+  const cookieHeader = await getMarketCookie({ brokerAccountId, clientCode });
+
+  const cached = getMarketSession(brokerAccountId);
+  if (cached?.accessToken) {
+    return { cookieHeader, accessToken: cached.accessToken };
+  }
+
+  const accessToken = await fetchAccessToken(cookieHeader);
+  if (!accessToken) {
+    throw new Error("The dashboard page did not carry an access token.");
+  }
+  saveMarketSession(brokerAccountId, { cookieHeader, accessToken });
+  return { cookieHeader, accessToken };
+};
+
+// GET on a token endpoint, e.g.
+//   fetchDashboardApi("/company-statement",
+//     { symbol: "LCI", interval: "annual", type: "fundamentals" }, account)
+// where account is { brokerAccountId, clientCode }.
+const fetchDashboardApi = async (path, params, account, retry = true) => {
+  const { cookieHeader, accessToken } = await getMarketAuth(account);
+
+  try {
+    const response = await axios.get(`${DASHBOARD_URL}${path}`, {
+      params,
+      headers: {
+        ...AJAX_HEADERS,
+        accept: "*/*",
+        cookie: cookieHeader,
+        authorization: `Bearer ${accessToken}`,
+      },
+    });
+    return response.data?.data ?? response.data;
+  } catch (error) {
+    // A dashboard page was opened elsewhere (a browser tab), which rotated
+    // the token. Forget ours and try once more with a fresh one.
+    if (error.response?.status === 401 && retry) {
+      saveMarketSession(account.brokerAccountId, { cookieHeader, accessToken: null });
+      return fetchDashboardApi(path, params, account, false);
+    }
+    throw error;
+  }
 };
 
 
@@ -457,10 +530,12 @@ const getTrend = async (req, res) => {
 
 export {
   syncPrices,
+  syncPricesForAccount,
   getPrices,
   syncSecurities,
   searchSecurities,
   getTrend,
   fetchMarket,
+  fetchDashboardApi,
   savePrices,
 };

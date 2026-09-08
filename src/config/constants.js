@@ -44,8 +44,14 @@ const BROKER_CODE = "AHL_ETRADE";
 // stored credentials are cleared but the trade history is kept.
 const SYNC_STATUS = {
   IDLE: "idle",
+  SYNCING: "syncing",
+  ERROR: "error",
   DISCONNECTED: "disconnected",
 };
+
+// Nightly sync: weekdays at 17:30 Karachi time, after the market closes.
+const SYNC_SCHEDULE = "30 17 * * 1-5";
+const SYNC_TIMEZONE = "Asia/Karachi";
 
 // Path the login form posts to, relative to BROKER_URL.
 const BROKER_LOGIN_PATH = "/Home/_Login";
@@ -87,6 +93,8 @@ export {
   BROKER_URL,
   BROKER_CODE,
   SYNC_STATUS,
+  SYNC_SCHEDULE,
+  SYNC_TIMEZONE,
   BROKER_LOGIN_PATH,
   BROKER_HISTORY_PATH,
   BROKER_COLLATERALS_PATH,

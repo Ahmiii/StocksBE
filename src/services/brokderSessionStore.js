@@ -31,13 +31,15 @@ const clearSession = (brokerAccountId) => sessions.delete(brokerAccountId);
 /* handoff when it lapses.                                                    */
 /* -------------------------------------------------------------------------- */
 
-// brokerAccountId -> { cookieHeader, expiresAt }
+// brokerAccountId -> { cookieHeader, accessToken, expiresAt }
+// accessToken is the dashboard page's bearer token; null until first needed.
 const marketSessions = new Map();
 const MARKET_TTL_MS = 110 * 60 * 1000;
 
-const saveMarketSession = (brokerAccountId, { cookieHeader }) => {
+const saveMarketSession = (brokerAccountId, { cookieHeader, accessToken = null }) => {
   marketSessions.set(brokerAccountId, {
     cookieHeader,
+    accessToken,
     expiresAt: Date.now() + MARKET_TTL_MS,
   });
 };

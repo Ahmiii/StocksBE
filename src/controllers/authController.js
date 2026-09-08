@@ -1,8 +1,21 @@
 import { prisma } from "../config/db.js";
 import bcrypt from "bcryptjs";
 import { generateWebToken } from "../utils/generateToken.js";
+
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 const register = async (req, res) => {
-  const { email, password, fullName } = req?.body;
+  const { email, password, fullName } = req?.body ?? {};
+  if (!email || !password || !fullName) {
+    return res.status(400).json({ error: "email, password and fullName are required." });
+  }
+  if (!EMAIL_PATTERN.test(email)) {
+    return res.status(400).json({ error: "email is not valid." });
+  }
+  if (password.length < 6) {
+    return res.status(400).json({ error: "password must be at least 6 characters." });
+  }
+
   const userExists = await prisma?.user?.findUnique({
     where: {
       email: email,
@@ -40,7 +53,11 @@ const register = async (req, res) => {
 };
 
 const login = async (req, res) => {
-  const { email, password } = req?.body;
+  const { email, password } = req?.body ?? {};
+  if (!email || !password) {
+    return res.status(400).json({ error: "email and password are required." });
+  }
+
   const user = await prisma?.user?.findUnique({
     where: {
       email: email,
