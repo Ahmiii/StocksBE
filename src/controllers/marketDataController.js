@@ -11,6 +11,7 @@ import {
 } from "../config/constants.js";
 import { buildCookieHeader, parseSetCookies } from "../utils/extractAHLInfor.js";
 import { parseDateRange, formatDate } from "../utils/dateRange.js";
+import { pauseBetweenCalls, providerSaysStop } from "../utils/pace.js";
 import {
   getSession,
   saveMarketSession,
@@ -19,6 +20,22 @@ import {
 } from "../services/brokderSessionStore.js";
 
 const DASHBOARD_URL = process.env.DASHBOARD_URL;
+
+// The dashboard's page host; the API lives under /api/v3 of the same host.
+const DASHBOARD_HOME = DASHBOARD_URL ? new URL(DASHBOARD_URL).origin : "";
+
+// The page a browser would be on when it makes a given API call. Sent as the
+// Referer so our calls look like the dashboard's own.
+const pageFor = (symbol) =>
+  symbol ? `${DASHBOARD_HOME}/research/company/${symbol}` : `${DASHBOARD_HOME}/`;
+
+// Every API call carries the same headers Chrome sends from the dashboard.
+const apiHeaders = (symbol, extra) => ({
+  ...BROWSER_HEADERS,
+  ...AJAX_HEADERS,
+  Referer: pageFor(symbol),
+  ...extra,
+});
 
 // Manual fallback: a laravel_session copied out of the browser. Only used when
 // there is no live broker session to run the handoff with.
@@ -141,13 +158,10 @@ const getMarketCookie = async ({ brokerAccountId, clientCode }) => {
 // One call to the market API. `path` is what the dashboard passes through,
 // e.g. "/daily/FFC".
 const fetchMarket = async (path, cookieHeader) => {
+  const symbol = path.split("/")[2]; // "/daily/FFC" -> "FFC"
   const response = await axios.get(`${DASHBOARD_URL}/market`, {
     params: { path },
-    headers: {
-      accept: "*/*",
-      "x-requested-with": "XMLHttpRequest",
-      cookie: cookieHeader,
-    },
+    headers: apiHeaders(symbol, { cookie: cookieHeader }),
   });
 
   // The API also returns a "count" field, but it is unreliable (0 even when
@@ -182,25 +196,11 @@ const savePrices = async (securityId, bars) => {
 // Pulls ~5 years of daily bars for every security we know about, plus the
 // benchmark. Safe to run repeatedly: the first run backfills, later runs only
 // add the days that have appeared since.
-// Fetches the missing daily bars for everything held or watched, plus the
-// benchmark. Shared by the sync endpoint and the nightly job. Throws when no
-// market session can be issued.
-const syncPricesForAccount = async (account) => {
-  const cookieHeader = await getMarketCookie({
-    brokerAccountId: account.id,
-    clientCode: account.clientCode,
-  });
-
-  await prisma.security.upsert({
-    where: { symbol: BENCHMARK_SYMBOL },
-    create: { symbol: BENCHMARK_SYMBOL, companyName: "KSE-100 Index" },
-    update: {},
-  });
-
-  // Only what is held, plus the benchmark. The securities table carries the
-  // whole exchange (~557 rows) for the watchlist; fetching five years for each
-  // would be hundreds of calls for data nobody looks at.
-  const securities = await prisma.security.findMany({
+// Only what is held or watched, plus the benchmark. The securities table
+// carries the whole exchange (~557 rows) for the watchlist; fetching five
+// years for each would be hundreds of calls for data nobody looks at.
+const heldOrWatchedSecurities = () =>
+  prisma.security.findMany({
     where: {
       OR: [
         { positions: { some: { quantity: { gt: 0 } } } },
@@ -219,6 +219,23 @@ const syncPricesForAccount = async (account) => {
     },
     orderBy: { symbol: "asc" },
   });
+
+// Fetches the missing daily bars for everything held or watched, plus the
+// benchmark. Shared by the sync endpoint and the nightly job. Throws when no
+// market session can be issued.
+const syncPricesForAccount = async (account) => {
+  const cookieHeader = await getMarketCookie({
+    brokerAccountId: account.id,
+    clientCode: account.clientCode,
+  });
+
+  await prisma.security.upsert({
+    where: { symbol: BENCHMARK_SYMBOL },
+    create: { symbol: BENCHMARK_SYMBOL, companyName: "KSE-100 Index" },
+    update: {},
+  });
+
+  const securities = await heldOrWatchedSecurities();
 
   const today = new Date().toLocaleDateString("en-CA", {
     timeZone: "Asia/Karachi",
@@ -243,9 +260,11 @@ const syncPricesForAccount = async (account) => {
         symbol: security.symbol,
         error: error.response?.status ?? error.message,
       });
+      // Rate limited or the provider is down: do not keep knocking.
+      if (providerSaysStop(error)) break;
     }
 
-    await new Promise((resolve) => setTimeout(resolve, 400));
+    await pauseBetweenCalls();
   }
 
   return {
@@ -286,9 +305,6 @@ const syncPrices = async (req, res) => {
 /* fetched once per market session and refreshed once on a 401.               */
 /* -------------------------------------------------------------------------- */
 
-// The dashboard's page host; the API lives under /api/v3 of the same host.
-const DASHBOARD_HOME = DASHBOARD_URL ? new URL(DASHBOARD_URL).origin : "";
-
 const fetchAccessToken = async (cookieHeader) => {
   const response = await axios.get(`${DASHBOARD_HOME}/`, {
     headers: { ...BROWSER_HEADERS, ...NAVIGATION_HEADERS, cookie: cookieHeader },
@@ -315,33 +331,61 @@ const getMarketAuth = async ({ brokerAccountId, clientCode }) => {
   return { cookieHeader, accessToken };
 };
 
-// GET on a token endpoint, e.g.
-//   fetchDashboardApi("/company-statement",
-//     { symbol: "LCI", interval: "annual", type: "fundamentals" }, account)
-// where account is { brokerAccountId, clientCode }.
-const fetchDashboardApi = async (path, params, account, retry = true) => {
+// One request to a token endpoint. account is { brokerAccountId, clientCode };
+// symbol is the company page the browser would be on.
+const dashboardRequest = async (request, account, retry = true) => {
+  const { method = "get", path, params, data, symbol } = request;
   const { cookieHeader, accessToken } = await getMarketAuth(account);
 
   try {
-    const response = await axios.get(`${DASHBOARD_URL}${path}`, {
+    const response = await axios({
+      method,
+      url: `${DASHBOARD_URL}${path}`,
       params,
-      headers: {
-        ...AJAX_HEADERS,
-        accept: "*/*",
+      data,
+      headers: apiHeaders(symbol, {
         cookie: cookieHeader,
         authorization: `Bearer ${accessToken}`,
-      },
+      }),
     });
-    return response.data?.data ?? response.data;
+    return response.data;
   } catch (error) {
     // A dashboard page was opened elsewhere (a browser tab), which rotated
     // the token. Forget ours and try once more with a fresh one.
     if (error.response?.status === 401 && retry) {
       saveMarketSession(account.brokerAccountId, { cookieHeader, accessToken: null });
-      return fetchDashboardApi(path, params, account, false);
+      return dashboardRequest(request, account, false);
     }
     throw error;
   }
+};
+
+// GET on a token endpoint, e.g.
+//   fetchDashboardApi("/company-statement",
+//     { symbol: "LCI", interval: "annual", type: "fundamentals" }, account)
+// The symbol comes from the params or the end of the path (…/LCI).
+const fetchDashboardApi = async (path, params, account) => {
+  const last = path.split("/").pop();
+  const symbol = params?.symbol ?? (/^[A-Z0-9]+$/.test(last) ? last : null);
+  const body = await dashboardRequest({ path, params, symbol }, account);
+  return body?.data ?? body;
+};
+
+// Daily bars that are NOT adjusted for splits, since `from` (a Date), newest
+// first: { time (unix seconds), open, high, low, close, volume }.
+const fetchUnadjustedBars = async (symbol, from, account) => {
+  const form = new URLSearchParams({
+    item: "bars",
+    symbol,
+    freq: "D",
+    from: String(Math.floor(from.getTime() / 1000)),
+    to: String(Math.floor(Date.now() / 1000) + 86400),
+  });
+  const body = await dashboardRequest(
+    { method: "post", path: "/market", params: { path: "/rq", adj: "false" }, data: form, symbol },
+    account,
+  );
+  return body?.data ?? [];
 };
 
 
@@ -529,13 +573,16 @@ const getTrend = async (req, res) => {
 };
 
 export {
+  BENCHMARK_SYMBOL,
   syncPrices,
   syncPricesForAccount,
+  heldOrWatchedSecurities,
   getPrices,
   syncSecurities,
   searchSecurities,
   getTrend,
   fetchMarket,
   fetchDashboardApi,
+  fetchUnadjustedBars,
   savePrices,
 };

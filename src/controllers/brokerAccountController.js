@@ -435,7 +435,13 @@ const syncAccount = async ({ account, session, params }) => {
     },
     orderBy: { executedAt: "asc" },
   });
-  const computed = calculatePositions(allTrades);
+
+  // Splits, bonus shares and mergers restate old trades in today's share units.
+  const actions = await prisma.corporateAction.findMany({
+    where: { type: { in: ["SPLIT", "BONUS", "MERGER"] } },
+    orderBy: { exDate: "asc" },
+  });
+  const computed = calculatePositions(allTrades, actions);
 
   const posotion = mergePositions({
     computed,
@@ -474,6 +480,15 @@ const syncAccount = async ({ account, session, params }) => {
     }),
   );
   await prisma.$transaction(positionUpsert);
+
+  // A merged-away symbol (ENGRO → ENGROH) keeps its old row; empty it.
+  const mergedAway = actions.filter((a) => a.type === "MERGER").map((a) => a.securityId);
+  if (mergedAway.length) {
+    await prisma.position.updateMany({
+      where: { portfolioId: portfolioId.id, securityId: { in: mergedAway } },
+      data: { quantity: 0 },
+    });
+  }
 
   // mtmPrice is today's market price — the only price feed we have, and it only
   // covers the broker-held symbols.

@@ -113,8 +113,43 @@ export const reconcilePositions = ({ computed, collaterals, securityIdBySymbol }
   return mismatches;
 };
 
-export const calculatePositions = (trades) => {
-  let groupedData = Object.groupBy(trades, (trade) => trade.securityId);
+// Restates trades in today's share units. Prices and the broker's holdings
+// are already adjusted for splits and bonus shares, so a trade made before
+// one must be scaled the same way: quantity × ratio, price ÷ ratio, for every
+// SPLIT or BONUS dated after the trade. A MERGER also moves the trade to the
+// new security. actions: [{ securityId, type, exDate, ratio, toSecurityId }].
+export const applyCorporateActions = (trades, actions = []) => {
+  if (actions.length === 0) return trades;
+  const byDate = [...actions].sort((a, b) => a.exDate - b.exDate);
+
+  return trades.map((trade) => {
+    let securityId = trade.securityId;
+    let ratio = 1;
+    let merged = false;
+    for (const action of byDate) {
+      if (action.securityId !== securityId || action.exDate <= trade.executedAt) continue;
+      ratio *= Number(action.ratio);
+      if (action.type === "MERGER") {
+        securityId = action.toSecurityId;
+        merged = true;
+      }
+    }
+    // A merger pays the fraction in cash, so 8 × 2.244 is 17 shares, not 17.95.
+    const quantity = Number(trade.quantity) * ratio;
+    return {
+      ...trade,
+      securityId,
+      quantity: merged ? Math.floor(quantity) : quantity,
+      price: Number(trade.price) / ratio,
+    };
+  });
+};
+
+export const calculatePositions = (trades, actions = []) => {
+  let groupedData = Object.groupBy(
+    applyCorporateActions(trades, actions),
+    (trade) => trade.securityId,
+  );
   let parsData = Object.entries(groupedData).map(([key, value]) => {
     let stockQty = 0;
     let avgCost = 0;

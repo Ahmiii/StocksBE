@@ -199,7 +199,7 @@ The phase split in section 3 is what reconciles them: *behind badly in 2024–25
 
 ## 5. Caveats
 
-- **Dividends are excluded on both sides.** FFC, HUBC and MARI are heavy dividend payers; KSE100 is a price index (no dividends). The true gap is somewhat smaller than −371k. Closing this needs dividend records the backend does not have yet.
+- ~~**Dividends are excluded on both sides.**~~ Fixed on 2026-09-08 once the payouts sync existed. The portfolio's dividends (Rs 173,186 gross over the whole history) count as return on their ex-dates and sit in the headline as cash; the KSE100 side is credited with an assumed 4% a year since the stored index is price only. With both in, the time-weighted return is 81% against 139% and the same-cash gap is −335k. The earlier price-only figures in sections 1–4 are left as written.
 - **The shadow portfolio buys the index for free.** A real KSE100 ETF has fees; your cost basis includes commission. This slightly flatters the index.
 - **Sub-investor holdings are split-blind.** `GetCollaterals` cannot correct them. Two splits found already (SYS, BAFL); more may exist. Total exposure is under 1% of capital.
 - **Trade dates carry no time of day**, so a buy and the market's move on the same day are treated as simultaneous.
@@ -344,7 +344,7 @@ This is what turned "no splits detected" into a walk that matches the snapshot t
 
     "dataNotes": {
       "adjustedSplits": [ { "symbol": "SYS", "ratio": 5, "lastPreSplitTrade": "2025-05-07" } ],
-      "dividendsIncluded": false
+      "dividendsIncluded": true
     }
   }
 }
@@ -449,7 +449,9 @@ The Market tab stays the "market view" (each held stock's *price* vs the index, 
 | ENGRO | Delisted; each share swapped for **2.24407865 ENGROH** | 2025-01-14 | 17 ENGROH + cash for the fraction | 8 ENGRO, priced at 2025-01-03 |
 | BAFL | **2-for-1** split (face value Rs 10 → Rs 5) | 2026-04-20 | 66 shares | 33 shares |
 
-**The fix: a `corporate_actions` table filled in by hand.** Personal app, a few rows a year — a manual record beats any detection.
+> **Built on 2026-09-08 (Phase 1.1).** It turned out most of this fills itself: the provider's `payouts/announcement-break-down/SYMBOL` endpoint carries dividends, bonus and rights with ex-dates, and its unadjusted price feed (`market?path=/rq&adj=false`) reveals every split as a step in raw ÷ adjusted. Only mergers are typed in. See `API_DOCUMENTATION.md` endpoints 20–21 and section 11. The design below is kept as the reasoning.
+
+**The fix: a `corporate_actions` table.** Filled by the provider where it can be, by hand where it cannot.
 
 ```
 corporate_actions

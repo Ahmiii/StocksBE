@@ -1,6 +1,22 @@
 
 const INDEX = "KSE100";
-const MS_PER_YEAR = 365.25 * 24 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+const MS_PER_YEAR = 365.25 * DAY_MS;
+
+// Calendar days between two "YYYY-MM-DD" dates.
+const daysBetween = (from, to) => (new Date(to) - new Date(from)) / DAY_MS;
+
+// A holding is kept in today's share units. To count shares as they were on
+// an earlier day, divide out the splits and bonuses that came after it.
+const unitsFactorAfter = (symbol, day, actions) => {
+  let factor = 1;
+  for (const action of actions) {
+    if (action.symbol === symbol && action.type !== "MERGER" && action.exDate > day) {
+      factor *= action.ratio;
+    }
+  }
+  return factor;
+};
 
 // Latest close on or before `date`.
 const closeOnOrBefore = (closes, date) => {
@@ -73,25 +89,80 @@ const priceLookup = (prices, days) => {
   return (symbol, day) => filled[symbol]?.get(day) ?? 0;
 };
 
+// Corporate actions, as the controller loads them:
+//   [{ symbol, type: "SPLIT" | "BONUS" | "MERGER", exDate, ratio, toSymbol }]
+// Prices are already adjusted for splits and bonus shares, so a trade made
+// before one counts ratio× more shares today.
+const sharesToday = (trade, actions) => {
+  let ratio = 1;
+  for (const action of actions) {
+    if (action.symbol === trade.symbol && action.type !== "MERGER" && action.exDate > trade.date) {
+      ratio *= action.ratio;
+    }
+  }
+  return trade.quantity * ratio;
+};
+
+// Trades restated in today's units and symbols, for the per-position table.
+export const restateTrades = (trades, actions) =>
+  trades.map((trade) => {
+    let symbol = trade.symbol;
+    let ratio = 1;
+    for (const action of actions) {
+      if (action.symbol !== symbol || action.exDate <= trade.date) continue;
+      ratio *= action.ratio;
+      if (action.type === "MERGER") symbol = action.toSymbol;
+    }
+    return { ...trade, symbol, quantity: trade.quantity * ratio, price: trade.price / ratio };
+  });
+
 // Walks the portfolio one trading day at a time. Returns two lines that both
 // start at 100 on the first trade:
 //   portfolio – time-weighted: each day, value yesterday's holdings at
-//               today's prices and chain the change, THEN apply today's
-//               trades. Money added never moves the line.
-//   benchmark – KSE100 rebased to the first trade.
+//               today's prices (plus any dividend that went ex today) and
+//               chain the change, THEN apply today's trades. Money added
+//               never moves the line. Dividends count as return on the day
+//               and are then treated as paid out in cash.
+//   benchmark – KSE100 rebased to the first trade, credited with the index's
+//               own dividends at `indexYield` a year so the race is fair.
 // Every rupee spent also buys KSE100 units that day, which gives the
 // "same money into the index" shadow value.
-export const walkPortfolio = (trades, prices, splits = {}) => {
+// dividends: [{ symbol, exDate, amount }] with amount in Rs per share as of
+// that day.
+export const walkPortfolio = (trades, prices, actions = [], dividends = [], indexYield = 0) => {
   const days = tradingDays(trades, prices);
   const priceOf = priceLookup(prices, days);
   const tradesOn = Object.groupBy(trades, (trade) => trade.date);
-  const indexStart = priceOf(INDEX, days[0]);
 
-  // Shares a BUY adds, in today's post-split units.
-  const sharesBought = (trade) => {
-    const split = splits[trade.symbol];
-    const beforeSplit = split && trade.date <= split.lastPreDate;
-    return beforeSplit ? trade.quantity * split.ratio : trade.quantity;
+  // An ex-date can fall on a holiday; count the dividend on the next trading day.
+  const firstTradingDayFrom = (date) => days.find((day) => day >= date);
+  const dividendsOn = Object.groupBy(
+    dividends.filter((dividend) => firstTradingDayFrom(dividend.exDate)),
+    (dividend) => firstTradingDayFrom(dividend.exDate),
+  );
+  const mergersOn = Object.groupBy(
+    actions.filter((action) => action.type === "MERGER"),
+    (action) => action.exDate,
+  );
+
+  // The index with its dividends reinvested: price × a factor that grows at
+  // indexYield a year. Units are bought and valued at this level.
+  let indexAccrual = 1;
+  let previousDay = days[0];
+  const indexLevel = (day) => priceOf(INDEX, day) * indexAccrual;
+  const indexStart = indexLevel(days[0]);
+
+  const sharesBought = (trade) => sharesToday(trade, actions);
+
+  // Cash from dividends going ex today, for the shares held right now.
+  const dividendCashOn = (day, holdings) => {
+    let cash = 0;
+    for (const dividend of dividendsOn[day] ?? []) {
+      const sharesThen =
+        (holdings[dividend.symbol] ?? 0) / unitsFactorAfter(dividend.symbol, day, actions);
+      if (sharesThen > 0) cash += sharesThen * dividend.amount;
+    }
+    return cash;
   };
 
   const holdings = {};
@@ -107,6 +178,8 @@ export const walkPortfolio = (trades, prices, splits = {}) => {
   let valueYesterday = 0;
   let netCashIn = 0;
   let indexUnits = 0;
+  let dividendsReceived = 0;
+  const dividendFlows = [];
   let portfolioPeak = 0;
   let portfolioWorstFall = 0;
   let indexPeak = 0;
@@ -114,20 +187,37 @@ export const walkPortfolio = (trades, prices, splits = {}) => {
   const series = [];
 
   for (const day of days) {
-    // 1. how did what I already owned do today?
-    if (valueYesterday > 0) line *= valueOn(day) / valueYesterday;
+    // 0. the index earns its dividends too, spread over the calendar
+    indexAccrual *= (1 + indexYield) ** (daysBetween(previousDay, day) / 365);
+    previousDay = day;
+
+    // 1. how did what I already owned do today, dividend included?
+    const dividendCash = dividendCashOn(day, holdings);
+    if (valueYesterday > 0) line *= (valueOn(day) + dividendCash) / valueYesterday;
+    if (dividendCash > 0) {
+      dividendsReceived += dividendCash;
+      dividendFlows.push({ date: day, amount: dividendCash });
+    }
 
     // 2. now apply today's trades
     for (const trade of tradesOn[day] ?? []) {
       const cash = cashOut(trade);
       netCashIn += cash;
-      indexUnits += cash / priceOf(INDEX, day);
+      indexUnits += cash / indexLevel(day);
       const change = trade.side === "BUY" ? sharesBought(trade) : -trade.quantity;
       holdings[trade.symbol] = (holdings[trade.symbol] ?? 0) + change;
     }
 
+    // 3. a merger swaps the old shares for the new symbol (fractions are paid in cash)
+    for (const merger of mergersOn[day] ?? []) {
+      const oldShares = holdings[merger.symbol] ?? 0;
+      if (oldShares <= 0) continue;
+      holdings[merger.toSymbol] = (holdings[merger.toSymbol] ?? 0) + Math.floor(oldShares * merger.ratio);
+      holdings[merger.symbol] = 0;
+    }
+
     const valueToday = valueOn(day);
-    const benchmark = (priceOf(INDEX, day) / indexStart) * 100;
+    const benchmark = (indexLevel(day) / indexStart) * 100;
 
     portfolioPeak = Math.max(portfolioPeak, line);
     portfolioWorstFall = Math.min(portfolioWorstFall, line / portfolioPeak - 1);
@@ -140,7 +230,8 @@ export const walkPortfolio = (trades, prices, splits = {}) => {
       benchmark,
       value: valueToday,
       netCashIn,
-      shadow: indexUnits * priceOf(INDEX, day),
+      dividends: dividendsReceived,
+      shadow: indexUnits * indexLevel(day),
     });
     valueYesterday = valueToday;
   }
@@ -149,6 +240,8 @@ export const walkPortfolio = (trades, prices, splits = {}) => {
   return {
     series,
     netCashIn,
+    dividendsReceived,
+    dividendFlows,
     portfolioValue: last.value,
     shadowValue: last.shadow,
     portfolioReturn: last.portfolio - 100,
@@ -193,8 +286,18 @@ const averageBuyDate = (buys) => {
   return new Date(weightedTime / cost).toISOString().slice(0, 10);
 };
 
-// Each open position against KSE100 since the day it was bought.
-export const positionsVsBenchmark = (positions, trades, prices, asOf) => {
+// Each open position against KSE100 since the day it was bought. Dividends
+// received since then count towards the stock, and the index is credited
+// with `indexYield` a year over the same window.
+export const positionsVsBenchmark = (
+  positions,
+  trades,
+  prices,
+  asOf,
+  dividends = [],
+  actions = [],
+  indexYield = 0,
+) => {
   const index = prices[INDEX];
   const indexNow = closeOnOrBefore(index, asOf);
   const rows = [];
@@ -208,17 +311,30 @@ export const positionsVsBenchmark = (positions, trades, prices, asOf) => {
     const buys = trades.filter(
       (trade) => trade.symbol === position.symbol && trade.side === "BUY",
     );
+    // No buys on record means the shares arrived another way (a merger the
+    // position table has not caught up with yet); nothing to measure from.
+    if (buys.length === 0) continue;
     const boughtOn = barOnOrAfter(index, averageBuyDate(buys));
     if (!boughtOn) continue;
 
-    const stockReturn = (lastPrice / position.avgCost - 1) * 100;
-    const benchmarkReturn = (indexNow / boughtOn.close - 1) * 100;
+    // Dividends per share since the buy date, in today's share units.
+    let dividendsPerShare = 0;
+    for (const dividend of dividends) {
+      const sinceBuy = dividend.exDate > boughtOn.date && dividend.exDate <= asOf;
+      if (dividend.symbol !== position.symbol || !sinceBuy) continue;
+      dividendsPerShare += dividend.amount / unitsFactorAfter(position.symbol, dividend.exDate, actions);
+    }
+
+    const years = daysBetween(boughtOn.date, asOf) / 365;
+    const stockReturn = ((lastPrice + dividendsPerShare) / position.avgCost - 1) * 100;
+    const benchmarkReturn = ((indexNow / boughtOn.close) * (1 + indexYield) ** years - 1) * 100;
 
     rows.push({
       symbol: position.symbol,
       quantity: position.quantity,
       avgCost: position.avgCost,
       lastPrice,
+      dividendsPerShare,
       buyDate: boughtOn.date,
       stockReturn,
       benchmarkReturn,

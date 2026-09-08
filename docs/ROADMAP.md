@@ -18,7 +18,7 @@
 ### 0.2 Scheduled sync — M
 - **Why:** today nothing updates unless someone opens the app and the broker session (15 min) is alive. Analytics on stale prices is wrong analytics.
 - **Decision to make:** unattended sync needs a broker login without you present. Either store the broker password encrypted (`credentialsEnc` already exists, unused) or accept that sync only runs while the app has recently linked. For a personal app, encrypt-at-rest with a key in `.env` is reasonable.
-- **Backend:** `node-cron` job at 17:30 PKT on weekdays: broker login → trade sync → price sync (held + watched + indices) → fundamentals refresh for held symbols weekly. Log each run to a `sync_runs` table (started, finished, counts, error).
+- **Backend (as built):** `node-cron` job on weekdays at a random time between 18:00 and 23:00 PKT, with a catch-up at startup if a restart ate the evening's run: broker login → corporate actions → trade sync → price sync. Status and time on the broker account row instead of a `sync_runs` table.
 - **App:** Portfolio header shows "Synced 17:32" from the last run instead of the static "Sync now" label.
 - **Done when:** the app opens on a Monday morning with Friday's closes already there.
 
@@ -31,9 +31,9 @@
 
 ## Phase 1 — Make the numbers true
 
-### 1.1 Corporate actions — M
+### 1.1 Corporate actions — M — **done 2026-09-08**
 - **Why:** ENGRO became 17 ENGROH shares in Jan 2025 and BAFL split 2-for-1 in Apr 2026; the database still shows 8 ENGRO and 33 BAFL. The broker cannot tell us because both sit in the sub-investor account.
-- **Data:** entered by hand, a few rows a year. Spec and the exact records are in `BENCHMARK_ANALYTICS.md` §8.2.
+- **Data (as built):** dividends, bonus and rights from the provider's `payouts/announcement-break-down/SYMBOL`; splits detected from the provider's unadjusted price feed against our adjusted closes; mergers by hand with `npm run corporate-action`. First run recorded 263 dividends, 17 bonus issues, 4 splits and 4 rights across 24 symbols. Phase 0 is also done.
 - **Backend:** `corporate_actions` table (type SPLIT | BONUS | MERGER | DELIST, ratio, effective date, to-symbol). Applied in the position rebuild after sync and in the benchmark walk; `detectAdjustedSplits` becomes a warning instead of a guess. Mark ENGRO `delisted` in `listingStatus`.
 - **App:** stale-price badge on holdings (`priceAsOf` older than a week). Already spec'd; ten minutes.
 - **Done when:** positions show 17 ENGROH priced today and 66 BAFL, and the benchmark walk emits no "unrecorded split" warning.
@@ -45,7 +45,8 @@
 - **App:** header badge back to "today"; holdings rows get a day-change column.
 - **Done when:** the header matches the broker's own "today's P&L" at the close.
 
-### 1.3 Dividends and the cash ledger — L
+### 1.3 Dividends and the cash ledger — L — **dividend half done 2026-09-08**
+- **Built:** `GET /portfolio/:id/income` (entitled dividends from trades × recorded dividends: this fiscal year, last 12 months, projected, upcoming with buy-before dates, per holding) and the Income card plus dividend calendar on the Portfolio tab; the stock screen shows next dividend, trailing DPS and last split/bonus. Dividends are now inside the benchmark too: the time-weighted line counts a dividend as return on its ex-date, XIRR takes each one as an inflow, the headline shows holdings + dividends against a shadow index credited with 4% a year (`KSE100_DIVIDEND_YIELD`), and per-stock alpha includes dividends per share. **Still open:** the broker cash ledger (real deposits, withdrawals, credits, charges).
 - **Why:** the largest missing piece. PSX is a dividend market (LCI 4.4%, FFC and the banks higher) and none of it is counted, so every return is understated and XIRR is built from trade flows instead of real deposits.
 - **Data:** two sources. The broker's account statement / ledger (find the endpoint in the web app the same way `GetOrderHisotry` was found) for actual cash: deposits, withdrawals, dividend credits, charges, tax. The provider's `payouts/announcement-break-down/SYMBOL` for announced DPS and book-closure dates.
 - **Backend:** `cash_events` table (date, type DEPOSIT | WITHDRAWAL | DIVIDEND | CHARGE | TAX, amount, symbol?). Sync from the ledger with the same fingerprint idea as trades. Benchmark walk: dividends are inflows that stay in the portfolio (total return); XIRR uses real deposits and withdrawals; headline adds `dividendsReceived` and `cash`.

@@ -154,7 +154,8 @@ Backend/
 │   │   ├── authController.js    # register, login
 │   │   ├── brokerAccountController.js # link broker, list, disconnect, sync trades
 │   │   ├── portfolioController.js # portfolio list, positions, trades, benchmark vs KSE100
-│   │   ├── marketDataController.js # price sync, securities import + search, trend chart
+│   │   ├── marketDataController.js # price sync, securities import + search, trend chart, token endpoints
+│   │   ├── corporateActionController.js # dividends/bonus/rights from payouts, splits from prices
 │   │   └── watchlistController.js # watchlist list / add / remove
 │   ├── services/
 │   │   └── brokderSessionStore.js # In-memory store for broker + market cookies
@@ -397,6 +398,8 @@ These matter because the sync code relies on them for "upsert" (insert-or-update
 
 **`watchlist_items`** — one row per (user, security) the user wants to follow. It holds nothing but the link and when it was added; prices come from `daily_prices` at read time. Watched securities are automatically included in the price sync scope.
 
+**`corporate_actions`** — one row per event that changes what a share is worth or how many you hold: `type` (`DIVIDEND`, `BONUS`, `RIGHTS`, `SPLIT`, `MERGER`), `ex_date`, `ratio` (new shares per old for bonus, split and merger), `amount` (Rs per share for a dividend, the price for rights), `to_security_id` (merger only), `source` (`payouts`, `prices`, `manual`), `provider_id`. Unique on (security, type, ex-date). Filled by endpoint 20 and the nightly job; read by the position rebuild and the benchmark walk (section 11).
+
 ---
 
 ## 8. Authentication
@@ -459,7 +462,10 @@ Every protected endpoint filters by `req.user.id`. A user can only see or change
 | 16 | POST | `/watchlist/:securityId` | 🔒 | Add a security to my watchlist |
 | 17 | DELETE | `/watchlist/:securityId` | 🔒 | Remove a security from my watchlist |
 | 18 | GET | `/portfolio/:id/benchmark` | 🔒 | Portfolio vs `KSE100`: same-cash shadow, time-weighted chart, XIRR, per-stock alpha |
-| 19 | POST | `/broker/accounts/:id/full-sync` | 🔒 | The nightly routine on demand: log in with the stored password, then trades + prices |
+| 19 | POST | `/broker/accounts/:id/full-sync` | 🔒 | The nightly routine on demand: log in with the stored password, then corporate actions, trades, prices |
+| 20 | POST | `/market/corporate-actions/sync/:id` | 🔒 | Pull dividends, bonus and rights from the provider and detect splits from prices, for held + watched symbols |
+| 21 | GET | `/market/corporate-actions/:symbol` | 🔒 | Every recorded corporate action for one symbol |
+| 22 | GET | `/portfolio/:id/income` | 🔒 | Dividend income: this fiscal year, last 12 months, projected, upcoming ex-dates, per holding |
 
 ---
 
@@ -696,6 +702,46 @@ Example: `POST /broker/accounts/8a2e…/sync?from=2024-01-01&to=2024-12-31`
 
 ---
 
+#### 22. `GET /portfolio/:id/income` 🔒
+
+Dividend income worked out from `trades` and the recorded `DIVIDEND` actions: for every dividend, the shares held on its ex-date (in that date's share units, so splits and bonus issues are respected) times the amount per share. It is **entitled** income, not a bank statement: the broker's cash ledger is not read yet (roadmap 1.3). `net` is after the 15% withholding tax for a filer (`taxRate`). Fiscal years run July to June, so `fiscalYear: 2027` is Jul 2026 – Jun 2027.
+
+**Success — `200 OK`** (lists abbreviated)
+
+```json
+{
+  "message": "success",
+  "data": {
+    "thisYear": { "fiscalYear": 2027, "dividends": 6, "gross": 32467.75, "net": 27597.59 },
+    "lastTwelveMonths": { "dividends": 32, "gross": 143057.5, "net": 121598.88 },
+    "projected": { "gross": 223835.75, "net": 190260.39, "yieldOnCost": 4.77, "currentYield": 4.46 },
+    "byYear": [ { "fiscalYear": 2027, "gross": 32467.75, "net": 27597.59 }, { "fiscalYear": 2026, "gross": 116415, "net": 98952.75 } ],
+    "upcoming": [
+      { "symbol": "LCI", "exDate": "2026-09-18", "buyBefore": "2026-09-17", "amount": 5.25,
+        "held": true, "shares": 2415, "expected": { "gross": 12678.75, "net": 10776.94 } }
+    ],
+    "holdings": [
+      { "symbol": "FFC", "shares": 2270, "avgCost": 499.41, "lastPrice": 548.11, "trailingDps": 41,
+        "projected": 93070, "yieldOnCost": 8.21, "currentYield": 7.51, "thisYear": 32045, "nextExDate": null }
+    ],
+    "entitled": [ { "symbol": "BIPL", "exDate": "2026-09-01", "amount": 1.5, "shares": 101, "gross": 151.5, "net": 128.78 } ],
+    "taxRate": 0.15
+  }
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `thisYear` / `lastTwelveMonths` | Dividends already gone ex, this fiscal year to date and over the last 365 days. |
+| `projected` | Current holdings times each stock's dividends over the last twelve months: what the book should pay in the coming year if payouts hold. `yieldOnCost` divides by what you paid, `currentYield` by today's value. |
+| `upcoming` | Announced dividends on held and watched stocks that have not gone ex. `buyBefore` is the last weekday before the ex-date, since the price steps a day early (endpoint 20). `expected` is null for a watchlist-only stock. |
+| `holdings` | Per open position, sorted by projected income. `nextExDate` is null until the company announces. |
+| `entitled` | The last 20 dividends you qualified for, newest first. |
+
+**Errors:** 404 `{ "error": "Portfolio not found." }`.
+
+---
+
 #### 19. `POST /broker/accounts/:id/full-sync` 🔒
 
 Runs the nightly routine for one account right now (section 10.6): log in to the broker with the stored password, pull trades and holdings, rebuild positions, then fetch missing price bars. Use it to test the job or to refresh after market hours without waiting for 17:30.
@@ -890,36 +936,42 @@ The whole portfolio against `KSE100`, computed on read from `trades` and `daily_
     "window": { "from": "2024-07-29", "to": "2026-09-04", "tradingDays": 525 },
     "headline": {
       "netCashIn": 4461909.97,
-      "portfolio": 5083415.94,
-      "benchmark": 5454803.26,
-      "difference": -371387.32,
-      "portfolioReturnOnCash": 13.93,
-      "benchmarkReturnOnCash": 22.25
+      "portfolio": 5083604.37,
+      "dividends": 173185.75,
+      "portfolioWithDividends": 5256790.12,
+      "benchmark": 5591558.65,
+      "difference": -334768.53,
+      "portfolioReturnOnCash": 17.81,
+      "benchmarkReturnOnCash": 25.32
     },
     "timeWeighted": {
-      "portfolio": 60.36, "benchmark": 122.42, "alpha": -62.06,
-      "maxDrawdown": { "portfolio": -23.62, "benchmark": -22.57 }
+      "portfolio": 81.49, "benchmark": 139.27, "alpha": -57.78,
+      "maxDrawdown": { "portfolio": -22.86, "benchmark": -22.19 }
     },
-    "moneyWeighted": { "portfolioXirr": 18.6, "benchmarkXirr": 29.52 },
+    "moneyWeighted": { "portfolioXirr": 24.25, "benchmarkXirr": 33.12 },
     "phases": [
-      { "from": "2024-07-29", "to": "2026-02-02", "portfolio": 66.41, "benchmark": 134.76, "netCashInAtEnd": 1999631.62 },
-      { "from": "2026-02-02", "to": "2026-09-04", "portfolio": -3.64, "benchmark": -5.26, "netCashInAtEnd": 4461909.97 }
+      { "from": "2024-07-29", "to": "2026-02-02", "portfolio": 83.74, "benchmark": 149.14, "netCashInAtEnd": 1999631.62 },
+      { "from": "2026-02-02", "to": "2026-09-07", "portfolio": -1.22, "benchmark": -3.96, "netCashInAtEnd": 4461909.97 }
     ],
     "series": [
-      { "date": "2024-07-29", "portfolio": 100, "benchmark": 100, "value": 17669.62, "netCashIn": 20027.61 },
-      { "date": "2026-09-04", "portfolio": 160.36, "benchmark": 222.42, "value": 5083415.94, "netCashIn": 4461909.97 }
+      { "date": "2024-07-29", "portfolio": 100, "benchmark": 100, "value": 17669.62, "netCashIn": 20027.61, "dividends": 0 },
+      { "date": "2026-09-07", "portfolio": 181.49, "benchmark": 239.27, "value": 5083604.37, "netCashIn": 4461909.97, "dividends": 173185.75 }
     ],
     "positions": [
-      { "symbol": "FFC", "quantity": 2270, "avgCost": 499.41, "lastPrice": 548.11,
-        "buyDate": "2026-01-05", "stockReturn": 9.75, "benchmarkReturn": -3.88,
-        "alpha": 13.63, "costBasis": 1133660.7, "weight": 24.15 }
+      { "symbol": "FFC", "quantity": 2270, "avgCost": 499.41, "lastPrice": 548.11, "dividendsPerShare": 31.5,
+        "buyDate": "2026-01-05", "stockReturn": 16.06, "benchmarkReturn": -2.27,
+        "alpha": 18.33, "costBasis": 1133660.7, "weight": 24.15 }
     ],
     "dataNotes": {
-      "adjustedSplits": [
-        { "symbol": "BAFL", "ratio": 2, "lastPreSplitTrade": "2024-07-29" },
-        { "symbol": "SYS", "ratio": 5, "lastPreSplitTrade": "2025-05-07" }
+      "corporateActions": [
+        { "symbol": "ENGRO", "type": "MERGER", "exDate": "2025-01-14", "ratio": 2.24407865, "toSymbol": "ENGROH" },
+        { "symbol": "SYS", "type": "SPLIT", "exDate": "2025-06-02", "ratio": 5, "toSymbol": null },
+        { "symbol": "BAFL", "type": "SPLIT", "exDate": "2026-04-20", "ratio": 2, "toSymbol": null }
       ],
-      "dividendsIncluded": false
+      "unrecordedSplits": [],
+      "dividendsIncluded": true,
+      "dividendsKeptAsCash": true,
+      "indexDividendYieldAssumed": 0.04
     }
   }
 }
@@ -929,13 +981,15 @@ The whole portfolio against `KSE100`, computed on read from `trades` and `daily_
 
 | Field | Meaning |
 |---|---|
-| `headline` | Every rupee spent on a buy bought `KSE100` units at that day's level, every sell redeemed them; `benchmark` is those units at today's level. `portfolio` is `Σ quantity × lastPrice`. Deposits cannot distort this. |
-| `timeWeighted` | Both lines start at 100 on the first trade. Each day values yesterday's holdings at today's prices, chains the change, *then* applies the day's trades — so money added never moves the line. Slice and rebase on the client for any shorter window. |
-| `moneyWeighted` | XIRR (annualised) of the actual cash flows, with today's value as the final inflow; `benchmarkXirr` uses the shadow value instead. |
+| `headline` | Every rupee spent on a buy bought `KSE100` units at that day's level, every sell redeemed them; `benchmark` is those units at today's level, with the index's own dividends reinvested at `indexDividendYieldAssumed` a year. `portfolio` is `Σ quantity × lastPrice`; `dividends` is every dividend the holdings were entitled to (gross), kept as cash; `portfolioWithDividends` is the sum and the fair number to set against `benchmark`. Deposits cannot distort this. |
+| `timeWeighted` | Both lines start at 100 on the first trade. Each day values yesterday's holdings at today's prices **plus any dividend going ex that day**, chains the change, *then* applies the day's trades — so money added never moves the line, and a dividend counts as return instead of looking like a price drop. The benchmark line carries the assumed index yield. Slice and rebase on the client for any shorter window. |
+| `moneyWeighted` | XIRR (annualised) of the actual cash flows, with each dividend as an inflow on its ex-date and today's value as the final inflow; `benchmarkXirr` uses the trade flows and the shadow value instead. |
 | `phases` | The time-weighted return split at 2026-02-01 — the sentence that explains the chart. One phase if every trade is after the cut. |
 | `series` | One point per trading day (union of `KSE100` bar dates and trade dates). |
-| `positions` | Open positions only, sorted by `costBasis` desc. `buyDate` is the cost-weighted average of the buys, moved to the next trading day; `benchmarkReturn` is `KSE100` over `buyDate → asOf`. |
-| `dataNotes.adjustedSplits` | The stored price history is already divided for past splits; a trade priced far above that day's stored close reveals one. Pre-split trade quantities are multiplied by `ratio` when valuing holdings. |
+| `positions` | Open positions only, sorted by `costBasis` desc. `buyDate` is the cost-weighted average of the buys, moved to the next trading day. `stockReturn` is `(lastPrice + dividendsPerShare) / avgCost − 1`, with `dividendsPerShare` the dividends received since `buyDate` in today's share units; `benchmarkReturn` is `KSE100` over the same window plus the assumed index yield. |
+| `dataNotes.dividendsIncluded` | `true`. `dividendsKeptAsCash` says the portfolio's dividends are not reinvested (the index's are, via the yield assumption). `indexDividendYieldAssumed` is `KSE100_DIVIDEND_YIELD` in `constants.js`; there is no total-return KSE100 in the data we get, so 4% a year is an assumption. |
+| `dataNotes.corporateActions` | The recorded splits, bonus issues and mergers on the traded symbols (section 9.4, endpoint 20). The walk multiplies pre-event trade quantities by `ratio`, and on a merger's ex-date swaps the old shares for the new symbol. |
+| `dataNotes.unrecordedSplits` | Symbols where a trade was priced far above that day's stored close but no action is on file. Empty is good; anything here means the corporate actions sync missed an event. |
 
 The maths, the verification against the live data, and the roadmap (corporate actions table, extra screens) are in [`BENCHMARK_ANALYTICS.md`](BENCHMARK_ANALYTICS.md).
 
@@ -1151,6 +1205,59 @@ Chart `stock` and `benchmark`; show `close` in the tooltip (the real price); put
 
 ---
 
+#### 20. `POST /market/corporate-actions/sync/:id` 🔒
+
+Fills the `corporate_actions` table for every held or watched symbol. `:id` is the broker account, used only to get a market session. Two provider calls per symbol, 400 ms apart:
+
+1. **Payouts** — `payouts/announcement-break-down/SYMBOL` lists every PSX announcement. A row becomes a `DIVIDEND` (`amount` = Rs per share) when its `dividend` is above zero, a `BONUS` (`ratio` = 1 + bonus%) when its `bonus` is, a `RIGHTS` when its `rightIssue` is. Only `PUBLISH` rows with an `exDate` count.
+2. **Splits from prices** — the provider's raw feed (`market?path=/rq&adj=false`) is not split-adjusted; our stored closes are. Raw ÷ adjusted is flat between events and steps on an ex-date. A step of 1.3 or more with no bonus that week is recorded as a `SPLIT` with the step rounded to the nearest half (2, 5, 1.5). This is how BAFL's 2-for-1 on 2026-04-20 and SYS's 5-for-1 on 2025-06-02 were found.
+
+Mergers and symbol changes are not in any feed. Record them by hand: `npm run corporate-action -- ENGRO MERGER 2025-01-14 2.24407865 ENGROH` (also marks ENGRO `delisted`).
+
+**Success — `200 OK`**
+
+```json
+{
+  "message": "success",
+  "data": {
+    "securities": 24,
+    "actions": 297,
+    "results": [
+      { "symbol": "BAFL", "payouts": 20, "splits": 1 },
+      { "symbol": "ENGRO", "payouts": 24, "splits": 0 }
+    ]
+  }
+}
+```
+
+**Errors:** 404 unknown account; 401 when no market session can be issued (reconnect the broker).
+
+> The provider's adjusted prices step **one trading day before** the announced ex-date (the market goes ex a day early), and they are also nudged by cash dividends. Both effects are small; the one-day gap only matters for a trade made on that exact day.
+
+---
+
+#### 21. `GET /market/corporate-actions/:symbol` 🔒
+
+**Success — `200 OK`**
+
+```json
+{
+  "message": "success",
+  "data": {
+    "symbol": "SYS",
+    "actions": [
+      { "type": "DIVIDEND", "exDate": "2026-04-30", "ratio": null, "amount": 2, "toSymbol": null, "source": "payouts" },
+      { "type": "SPLIT", "exDate": "2025-06-02", "ratio": 5, "amount": null, "toSymbol": null, "source": "prices" },
+      { "type": "BONUS", "exDate": "2022-04-01", "ratio": 2, "amount": null, "toSymbol": null, "source": "payouts" }
+    ]
+  }
+}
+```
+
+Newest first. An unknown symbol returns an empty list.
+
+---
+
 ### 9.5 Watchlist
 
 A per-user list of securities to follow. Items reference `securities`, so anything the search endpoint returns can be added. Watched symbols are automatically included in the price sync (endpoint 10), so they get prices on the next run.
@@ -1346,17 +1453,29 @@ If the market API answers `401` mid-run, the cached cookie is thrown away so the
 
 ### 10.6 Nightly sync
 
-`src/jobs/dailySync.js`, started from `server.js`. On weekdays at **17:30 Asia/Karachi** (`SYNC_SCHEDULE` in `constants.js`) it takes every broker account that has a stored password and is not disconnected, and for each one:
+`src/jobs/dailySync.js`, started from `server.js`. On weekdays it runs **once, at a random time between 18:00 and 23:00 Asia/Karachi** (`SYNC_START_HOUR` and `SYNC_JITTER_MINUTES` in `constants.js`: the job wakes at 18:00 and waits a random slice of the window). If the server starts after 18:00 and no account has synced today, because a restart killed the pending run, it catches up within five minutes. For every broker account that has a stored password and is not disconnected, it does:
 
 1. `brokerLogin` with the decrypted password (`src/utils/secrets.js`, AES-256-GCM, key from `CREDENTIALS_KEY`);
-2. `syncAccount` — the same code as `POST /broker/accounts/:id/sync`: trades, holdings, positions, today's close from `mtmPrice`;
-3. `syncPricesForAccount` — the same code as `POST /market/sync/:id`: missing daily bars for held + watched symbols and `KSE100`.
+2. `syncCorporateActionsForAccount` — the same code as `POST /market/corporate-actions/sync/:id`, run first so the position rebuild can use the records;
+3. `syncAccount` — the same code as `POST /broker/accounts/:id/sync`: trades, holdings, positions, today's close from `mtmPrice`;
+4. `syncPricesForAccount` — the same code as `POST /market/sync/:id`: missing daily bars for held + watched symbols and `KSE100`.
 
 `syncStatus` on the account is `syncing` while it runs, `idle` on success (with `lastSyncedAt`), `error` on failure; failures are logged to the console and the next account still runs. The app's Portfolio header shows this as "Synced 8 Sep, 17:32" / "Last sync failed". `POST /broker/accounts/:id/full-sync` runs the same routine on demand.
 
 ### 10.7 Token endpoints on the analytics API
 
-Some dashboard endpoints (`company-statement` for fundamentals, `payouts/*`, `news/*`) need a **bearer token as well as the cookie**. Every dashboard page embeds a fresh token in `<meta name="access-token">`, and the previous one stops working. `fetchDashboardApi(path, params, account)` in `marketDataController.js` loads one page per market session to read it, caches it next to the cookie, and on a 401 (a browser tab rotated it) fetches a new one and retries once. Nothing uses it yet; fundamentals are next on the roadmap.
+Some dashboard endpoints (`company-statement` for fundamentals, `payouts/*`, `news/*`) need a **bearer token as well as the cookie**. Every dashboard page embeds a fresh token in `<meta name="access-token">`, and the previous one stops working. `fetchDashboardApi(path, params, account)` and `fetchUnadjustedBars(symbol, from, account)` in `marketDataController.js` load one page per market session to read it, cache it next to the cookie, and on a 401 (a browser tab rotated it) fetch a new one and retry once. The corporate actions sync uses both; fundamentals are next on the roadmap.
+
+### 10.8 Looking like the browser
+
+The provider sees one account fetching its own data once a day, which is what a person does; the point is not to *look* like a script. Four rules, all in `marketDataController.js` and `src/utils/pace.js`:
+
+- **Same headers as Chrome on every call** (`apiHeaders`): the browser user-agent, `Accept-Language`, `sec-ch-ua`, `X-Requested-With`, and a `Referer` of the company page the call belongs to (`/research/company/FFC` for FFC's bars). Before this, the price and token calls went out with `User-Agent: axios/1.20.0`.
+- **Irregular pacing**: one to three seconds between symbols (`pauseBetweenCalls`), never a fixed interval, never in parallel.
+- **A different time every evening** for the nightly job, anywhere in a five-hour window (section 10.6).
+- **Stop for the day** on a 429 or a 5xx (`providerSaysStop`): the loop breaks instead of retrying, and the next run is tomorrow's.
+
+Total footprint on a normal night: about 25 price calls and 48 corporate-action calls, spread over roughly three minutes.
 
 ## 11. How positions are calculated
 
@@ -1379,6 +1498,8 @@ At the end: if heldQty == 0, avgCost = 0
 ```
 
 This is the standard **average-cost method**. Buying raises/lowers the average; selling locks in profit against that average and does not change it.
+
+**Corporate actions first (`applyCorporateActions`).** Before the walk, every trade is restated in today's share units: for each `SPLIT` or `BONUS` on that security dated *after* the trade, quantity × ratio and price ÷ ratio; a `MERGER` also moves the trade to the new security (fractions floored, they are paid in cash). This is what makes a trade-derived position agree with the broker's already-adjusted figures — SYS from trades now comes out at 4,360 @ 129.83, the broker's own numbers to the paisa — and it is the only way to fix sub-investor holdings the broker never reports, like BAFL (33 → 66) and ENGRO (8 → 17 ENGROH). After the position upserts, a merged-away symbol's row is set to quantity 0.
 
 ### 11.1 Merging with the broker's live holdings (`mergePositions`)
 

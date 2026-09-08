@@ -64,12 +64,36 @@ model Security {
   sector         String?         @db.VarChar(120)
   listingStatus  String          @default("listed") @map("listing_status") @db.VarChar(16)
   updatedAt      DateTime        @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
-  trades         Trade[]
-  positions      Position[]
-  dailyPrices    DailyPrice[]
-  watchlistItems WatchlistItem[]
+  trades           Trade[]
+  positions        Position[]
+  dailyPrices      DailyPrice[]
+  watchlistItems   WatchlistItem[]
+  corporateActions CorporateAction[] @relation("actionsOf")
+  mergedFrom       CorporateAction[] @relation("mergedInto")
 
   @@map("securities")
+}
+
+// One event that changes what a share is worth or how many you hold.
+// DIVIDEND: amount = Rs per share. BONUS / SPLIT: ratio = new shares per old.
+// RIGHTS: ratio = entitlement per share, amount = subscription price.
+// MERGER: ratio = new shares per old, toSecurity = the new symbol.
+model CorporateAction {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  securityId   String    @map("security_id") @db.Uuid
+  type         String    @db.VarChar(16)
+  exDate       DateTime  @map("ex_date") @db.Date
+  ratio        Decimal?  @db.Decimal(18, 8)
+  amount       Decimal?  @db.Decimal(18, 4)
+  toSecurityId String?   @map("to_security_id") @db.Uuid
+  source       String    @db.VarChar(16)
+  providerId   String?   @map("provider_id") @db.VarChar(32)
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  security     Security  @relation("actionsOf", fields: [securityId], references: [id])
+  toSecurity   Security? @relation("mergedInto", fields: [toSecurityId], references: [id])
+
+  @@unique([securityId, type, exDate])
+  @@map("corporate_actions")
 }
 
 model WatchlistItem {

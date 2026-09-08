@@ -1054,7 +1054,68 @@
                   "value": "application/json; charset=utf-8"
                 }
               ],
-              "body": "{\n  \"message\": \"success\",\n  \"data\": {\n    \"asOf\": \"2026-09-04\",\n    \"window\": {\n      \"from\": \"2024-07-29\",\n      \"to\": \"2026-09-04\",\n      \"tradingDays\": 525\n    },\n    \"headline\": {\n      \"netCashIn\": 4461909.97,\n      \"portfolio\": 5083415.94,\n      \"benchmark\": 5454803.26,\n      \"difference\": -371387.32,\n      \"portfolioReturnOnCash\": 13.93,\n      \"benchmarkReturnOnCash\": 22.25\n    },\n    \"timeWeighted\": {\n      \"portfolio\": 60.36,\n      \"benchmark\": 122.42,\n      \"alpha\": -62.06,\n      \"maxDrawdown\": {\n        \"portfolio\": -23.62,\n        \"benchmark\": -22.57\n      }\n    },\n    \"moneyWeighted\": {\n      \"portfolioXirr\": 18.6,\n      \"benchmarkXirr\": 29.52\n    },\n    \"phases\": [\n      {\n        \"from\": \"2024-07-29\",\n        \"to\": \"2026-02-02\",\n        \"portfolio\": 66.41,\n        \"benchmark\": 134.76,\n        \"netCashInAtEnd\": 1999631.62\n      },\n      {\n        \"from\": \"2026-02-02\",\n        \"to\": \"2026-09-04\",\n        \"portfolio\": -3.64,\n        \"benchmark\": -5.26,\n        \"netCashInAtEnd\": 4461909.97\n      }\n    ],\n    \"series\": [\n      {\n        \"date\": \"2024-07-29\",\n        \"portfolio\": 100,\n        \"benchmark\": 100,\n        \"value\": 17669.62,\n        \"netCashIn\": 20027.61\n      },\n      {\n        \"date\": \"2026-09-04\",\n        \"portfolio\": 160.36,\n        \"benchmark\": 222.42,\n        \"value\": 5083415.94,\n        \"netCashIn\": 4461909.97\n      }\n    ],\n    \"positions\": [\n      {\n        \"symbol\": \"FFC\",\n        \"quantity\": 2270,\n        \"avgCost\": 499.41,\n        \"lastPrice\": 548.11,\n        \"buyDate\": \"2026-01-05\",\n        \"stockReturn\": 9.75,\n        \"benchmarkReturn\": -3.88,\n        \"alpha\": 13.63,\n        \"costBasis\": 1133660.7,\n        \"weight\": 24.15\n      }\n    ],\n    \"dataNotes\": {\n      \"adjustedSplits\": [\n        {\n          \"symbol\": \"BAFL\",\n          \"ratio\": 2,\n          \"lastPreSplitTrade\": \"2024-07-29\"\n        },\n        {\n          \"symbol\": \"SYS\",\n          \"ratio\": 5,\n          \"lastPreSplitTrade\": \"2025-05-07\"\n        }\n      ],\n      \"dividendsIncluded\": false\n    }\n  }\n}"
+              "body": "{\n  \"message\": \"success\",\n  \"data\": {\n    \"asOf\": \"2026-09-04\",\n    \"window\": {\n      \"from\": \"2024-07-29\",\n      \"to\": \"2026-09-04\",\n      \"tradingDays\": 525\n    },\n    \"headline\": {\n      \"netCashIn\": 4461909.97,\n      \"portfolio\": 5083604.37,\n      \"dividends\": 173185.75,\n      \"portfolioWithDividends\": 5256790.12,\n      \"benchmark\": 5591558.65,\n      \"difference\": -334768.53,\n      \"portfolioReturnOnCash\": 17.81,\n      \"benchmarkReturnOnCash\": 25.32\n    },\n    \"timeWeighted\": {\n      \"portfolio\": 81.49,\n      \"benchmark\": 139.27,\n      \"alpha\": -57.78,\n      \"maxDrawdown\": {\n        \"portfolio\": -22.86,\n        \"benchmark\": -22.19\n      }\n    },\n    \"moneyWeighted\": {\n      \"portfolioXirr\": 24.25,\n      \"benchmarkXirr\": 33.12\n    },\n    \"phases\": [\n      {\n        \"from\": \"2024-07-29\",\n        \"to\": \"2026-02-02\",\n        \"portfolio\": 66.41,\n        \"benchmark\": 134.76,\n        \"netCashInAtEnd\": 1999631.62\n      },\n      {\n        \"from\": \"2026-02-02\",\n        \"to\": \"2026-09-04\",\n        \"portfolio\": -3.64,\n        \"benchmark\": -5.26,\n        \"netCashInAtEnd\": 4461909.97\n      }\n    ],\n    \"series\": [\n      {\n        \"date\": \"2024-07-29\",\n        \"portfolio\": 100,\n        \"benchmark\": 100,\n        \"value\": 17669.62,\n        \"netCashIn\": 20027.61\n      },\n      {\n        \"date\": \"2026-09-04\",\n        \"portfolio\": 160.36,\n        \"benchmark\": 222.42,\n        \"value\": 5083415.94,\n        \"netCashIn\": 4461909.97\n      }\n    ],\n    \"positions\": [\n      {\n        \"symbol\": \"FFC\",\n        \"quantity\": 2270,\n        \"avgCost\": 499.41,\n        \"lastPrice\": 548.11,\n        \"buyDate\": \"2026-01-05\",\n        \"stockReturn\": 9.75,\n        \"benchmarkReturn\": -3.88,\n        \"alpha\": 13.63,\n        \"costBasis\": 1133660.7,\n        \"weight\": 24.15\n      }\n    ],\n    \"dataNotes\": {\n      \"corporateActions\": [\n        {\n          \"symbol\": \"BAFL\",\n          \"type\": \"SPLIT\",\n          \"exDate\": \"2026-04-20\",\n          \"ratio\": 2,\n          \"toSymbol\": null\n        }\n      ],\n      \"unrecordedSplits\": [],\n      \"dividendsIncluded\": true,\n      \"dividendsKeptAsCash\": true,\n      \"indexDividendYieldAssumed\": 0.04\n    }\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Dividend income",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/portfolio/{{portfolioId}}/income",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "portfolio",
+                "{{portfolioId}}",
+                "income"
+              ]
+            },
+            "description": "Dividend income worked out from trades and recorded dividends: this fiscal year, last 12 months, projected from current holdings, upcoming ex-dates with the day to own the shares by, and a per-holding breakdown. Net figures are after 15% withholding tax."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('has every block', () => pm.expect(pm.response.json().data).to.include.keys('thisYear', 'lastTwelveMonths', 'projected', 'byYear', 'upcoming', 'holdings', 'entitled', 'taxRate'));"
+                ]
+              }
+            }
+          ],
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/portfolio/{{portfolioId}}/income",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "portfolio",
+                    "{{portfolioId}}",
+                    "income"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "body": "{\n  \"message\": \"success\",\n  \"data\": {\n    \"thisYear\": {\n      \"fiscalYear\": 2027,\n      \"dividends\": 6,\n      \"gross\": 32467.75,\n      \"net\": 27597.59\n    },\n    \"lastTwelveMonths\": {\n      \"dividends\": 32,\n      \"gross\": 143057.5,\n      \"net\": 121598.88\n    },\n    \"projected\": {\n      \"gross\": 223835.75,\n      \"net\": 190260.39,\n      \"yieldOnCost\": 4.77,\n      \"currentYield\": 4.46\n    },\n    \"byYear\": [\n      {\n        \"fiscalYear\": 2027,\n        \"gross\": 32467.75,\n        \"net\": 27597.59\n      },\n      {\n        \"fiscalYear\": 2026,\n        \"gross\": 116415,\n        \"net\": 98952.75\n      }\n    ],\n    \"upcoming\": [\n      {\n        \"symbol\": \"LCI\",\n        \"exDate\": \"2026-09-18\",\n        \"buyBefore\": \"2026-09-17\",\n        \"amount\": 5.25,\n        \"held\": true,\n        \"shares\": 2415,\n        \"expected\": {\n          \"gross\": 12678.75,\n          \"net\": 10776.94\n        }\n      }\n    ],\n    \"holdings\": [\n      {\n        \"symbol\": \"FFC\",\n        \"shares\": 2270,\n        \"avgCost\": 499.41,\n        \"lastPrice\": 548.11,\n        \"trailingDps\": 41,\n        \"projected\": 93070,\n        \"yieldOnCost\": 8.21,\n        \"currentYield\": 7.51,\n        \"thisYear\": 32045,\n        \"nextExDate\": null\n      }\n    ],\n    \"entitled\": [],\n    \"taxRate\": 0.15\n  }\n}"
             }
           ]
         }
@@ -1514,6 +1575,121 @@
                 }
               ],
               "body": "{\n  \"message\": \"success\",\n  \"data\": {\n    \"symbol\": \"FFC\",\n    \"period\": \"6M\",\n    \"range\": { \"from\": \"2026-03-09\", \"to\": \"2026-09-04\" },\n    \"series\": [\n      { \"date\": \"2026-03-09\", \"close\": 471.4, \"stock\": 100, \"benchmark\": 100 },\n      { \"date\": \"2026-09-04\", \"close\": 548.11, \"stock\": 116.27, \"benchmark\": 119.69 }\n    ],\n    \"summary\": { \"stockReturn\": 16.27, \"benchmarkReturn\": 19.69, \"outperformance\": -3.42 }\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Sync corporate actions",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/market/corporate-actions/sync/{{brokerAccountId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "market",
+                "corporate-actions",
+                "sync",
+                "{{brokerAccountId}}"
+              ]
+            },
+            "description": "Dividends, bonus and rights from the provider payouts endpoint, plus splits detected from the unadjusted price feed, for every held + watched symbol. Two provider calls per symbol. Mergers are recorded by hand: npm run corporate-action -- ENGRO MERGER 2025-01-14 2.24407865 ENGROH"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('has counts', () => pm.expect(pm.response.json().data).to.include.keys('securities', 'actions', 'results'));"
+                ]
+              }
+            }
+          ],
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": []
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "body": "{\n  \"message\": \"success\",\n  \"data\": {\n    \"securities\": 24,\n    \"actions\": 297,\n    \"results\": [\n      {\n        \"symbol\": \"BAFL\",\n        \"payouts\": 20,\n        \"splits\": 1\n      },\n      {\n        \"symbol\": \"ENGRO\",\n        \"payouts\": 24,\n        \"splits\": 0\n      }\n    ]\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Corporate actions for a symbol",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/market/corporate-actions/SYS",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "market",
+                "corporate-actions",
+                "SYS"
+              ]
+            },
+            "description": "Every recorded dividend, bonus, rights, split and merger for one symbol, newest first."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('has actions', () => pm.expect(pm.response.json().data.actions).to.be.an('array'));"
+                ]
+              }
+            }
+          ],
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": []
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "body": "{\n  \"message\": \"success\",\n  \"data\": {\n    \"symbol\": \"SYS\",\n    \"actions\": [\n      {\n        \"type\": \"DIVIDEND\",\n        \"exDate\": \"2026-04-30\",\n        \"ratio\": null,\n        \"amount\": 2,\n        \"toSymbol\": null,\n        \"source\": \"payouts\"\n      },\n      {\n        \"type\": \"SPLIT\",\n        \"exDate\": \"2025-06-02\",\n        \"ratio\": 5,\n        \"amount\": null,\n        \"toSymbol\": null,\n        \"source\": \"prices\"\n      },\n      {\n        \"type\": \"BONUS\",\n        \"exDate\": \"2022-04-01\",\n        \"ratio\": 2,\n        \"amount\": null,\n        \"toSymbol\": null,\n        \"source\": \"payouts\"\n      }\n    ]\n  }\n}"
             }
           ]
         }

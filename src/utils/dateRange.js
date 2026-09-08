@@ -41,4 +41,4 @@ const parseDateRange = (query = {}) => {
   return { from, to };
 };
 
-export { parseDateRange, formatDate };
+export { parseDateRange, formatDate, today };
