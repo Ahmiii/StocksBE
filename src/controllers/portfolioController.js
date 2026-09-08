@@ -26,7 +26,9 @@ const positionsList = async (req, res) => {
   const { from, to, error } = parseDateRange(req.query);
   if (error) return res.status(400).json({ error });
 
-  const rows = await prisma.position.findMany({
+  // Every position in the portfolio, each with its two newest price rows:
+  // today's close and the close before it.
+  const positionRows = await prisma.position.findMany({
     where: {
       portfolioId: portfolioId,
       portfolio: {
@@ -46,53 +48,72 @@ const positionsList = async (req, res) => {
           companyName: true,
           dailyPrices: {
             orderBy: { tradeDate: "desc" },
-            take: 1,
+            take: 2,
             select: { close: true, tradeDate: true },
           },
         },
       },
     },
   });
- 
+
+  // Keep only positions that were held at some point inside the requested
+  // range: either shares were already held when the range started, or a buy
+  // happened inside it.
   const trades = await prisma.trade.findMany({
     where: { portfolioId },
     select: { securityId: true, side: true, quantity: true, executedAt: true },
   });
-  const tradesBySecurity = Object.groupBy(trades, (t) => t.securityId);
-  const held = rows.filter((row) => {
-    const list = tradesBySecurity[row.securityId];
-    if (!list) return Number(row.quantity) > 0;
-    let qtyAtFrom = 0;
-    for (const t of list) {
-      if (t.executedAt > to) continue;
-      if (t.executedAt < from) qtyAtFrom += (t.side === "BUY" ? 1 : -1) * Number(t.quantity);
-      else if (t.side === "BUY") return true;
+  const tradesBySecurity = Object.groupBy(trades, (trade) => trade.securityId);
+  const positionsHeldInRange = positionRows.filter((row) => {
+    const tradesOfThisStock = tradesBySecurity[row.securityId];
+    if (!tradesOfThisStock) return Number(row.quantity) > 0;
+    let quantityAtStart = 0;
+    for (const trade of tradesOfThisStock) {
+      if (trade.executedAt > to) continue;
+      if (trade.executedAt < from) {
+        quantityAtStart += (trade.side === "BUY" ? 1 : -1) * Number(trade.quantity);
+      } else if (trade.side === "BUY") {
+        return true;
+      }
     }
-    return qtyAtFrom > 0;
+    return quantityAtStart > 0;
   });
 
-  // Trend bars are a separate query so a stock with nothing in the requested
-  // range (e.g. delisted) still keeps its lastPrice from above.
-  const bars = await prisma.dailyPrice.findMany({
+  // Prices inside the range draw each holding's small trend line. A separate
+  // query, so a stock with no prices in the range (delisted, say) still keeps
+  // its lastPrice from above.
+  const pricesInRange = await prisma.dailyPrice.findMany({
     where: {
-      securityId: { in: held.map((row) => row.securityId) },
+      securityId: { in: positionsHeldInRange.map((row) => row.securityId) },
       tradeDate: { gte: from, lte: to },
     },
     orderBy: { tradeDate: "asc" },
     select: { securityId: true, tradeDate: true, close: true },
   });
-  const trendBySecurity = Object.groupBy(bars, (bar) => bar.securityId);
+  const trendBySecurity = Object.groupBy(pricesInRange, (price) => price.securityId);
+
+  // The newest price date across the holdings. A stock whose latest price is
+  // older than this (a delisted one, say) has no "today" to speak of.
+  const newestPriceDate = positionsHeldInRange
+    .map((row) => row.security.dailyPrices[0]?.tradeDate)
+    .filter(Boolean)
+    .sort((a, b) => b - a)[0];
 
   // Prisma hands Decimals back as strings, so everything is converted once here
   // rather than in every client that renders a number.
-  const positions = held.map((row) => {
+  const positions = positionsHeldInRange.map((row) => {
     const quantity = Number(row.quantity);
     const avgCost = Number(row.avgCost);
-    const bar = row.security.dailyPrices[0];
-
-    const lastPrice = bar ? Number(bar.close) : null;
+    const today = row.security.dailyPrices[0]; // newest price row
+    const previous = row.security.dailyPrices[1]; // the one before it
+    const lastPrice = today ? Number(today.close) : null;
     const investedValue = quantity * avgCost;
     const marketValue = lastPrice === null ? null : quantity * lastPrice;
+
+    // Day change only when this stock's newest price is as fresh as the rest.
+    const hasFreshPrice = today && today.tradeDate.getTime() === newestPriceDate?.getTime();
+    const previousClose = hasFreshPrice && previous ? Number(previous.close) : null;
+    const dayChange = previousClose === null ? null : quantity * (lastPrice - previousClose);
 
     return {
       id: row.id,
@@ -102,7 +123,11 @@ const positionsList = async (req, res) => {
       quantity,
       avgCost,
       lastPrice,
-      priceAsOf: bar ? bar.tradeDate.toISOString().slice(0, 10) : null,
+      priceAsOf: today ? formatDate(today.tradeDate) : null,
+      previousClose,
+      previousCloseDate: previousClose === null ? null : formatDate(previous.tradeDate),
+      dayChange,
+      dayChangePct: previousClose === null ? null : (lastPrice / previousClose - 1) * 100,
       investedValue,
       marketValue,
       unrealizedPnl: marketValue === null ? null : marketValue - investedValue,
@@ -111,18 +136,33 @@ const positionsList = async (req, res) => {
           ? null
           : ((marketValue - investedValue) / investedValue) * 100,
       realizedPnl: Number(row.realizedPnl),
-      trend: (trendBySecurity[row.securityId] ?? []).map((b) => ({
-        date: formatDate(b.tradeDate),
-        close: Number(b.close),
+      trend: (trendBySecurity[row.securityId] ?? []).map((price) => ({
+        date: formatDate(price.tradeDate),
+        close: Number(price.close),
       })),
     };
   });
 
   const open = positions.filter((p) => p.quantity > 0);
   const priced = open.filter((p) => p.marketValue !== null);
-
   const invested = priced.reduce((sum, p) => sum + p.investedValue, 0);
   const marketValue = priced.reduce((sum, p) => sum + p.marketValue, 0);
+
+  // Today's move: the rupee changes added up, as a percent of what those
+  // holdings were worth the day before.
+  const positionsWithDayChange = open.filter((p) => p.dayChange !== null);
+  const dayChange = positionsWithDayChange.reduce((sum, p) => sum + p.dayChange, 0);
+  const valueBeforeToday = positionsWithDayChange.reduce(
+    (sum, p) => sum + p.quantity * p.previousClose,
+    0,
+  );
+  // How much of the portfolio the day change covers. On the evening of a sync
+  // the broker has priced today's held stocks but the provider's bars for the
+  // smaller ones arrive later, so this can be below 100% for a few hours.
+  const valueWithDayChange = positionsWithDayChange.reduce((sum, p) => sum + p.marketValue, 0);
+  const dayChangeCoverage = marketValue > 0 ? (valueWithDayChange / marketValue) * 100 : null;
+  // The day the change is measured from — Friday on a Monday, not "yesterday".
+  const dayChangeFrom = positionsWithDayChange.map((p) => p.previousCloseDate).sort().at(-1) ?? null;
 
   res?.status(200)?.json({
     message: "success",
@@ -134,6 +174,11 @@ const positionsList = async (req, res) => {
         marketValue,
         unrealizedPnl: marketValue - invested,
         unrealizedPct: invested === 0 ? null : ((marketValue - invested) / invested) * 100,
+        dayChange: positionsWithDayChange.length ? dayChange : null,
+        dayChangePct: valueBeforeToday > 0 ? (dayChange / valueBeforeToday) * 100 : null,
+        dayChangeAsOf: newestPriceDate ? formatDate(newestPriceDate) : null,
+        dayChangeFrom,
+        dayChangeCoverage,
         realizedPnl: positions.reduce((sum, p) => sum + p.realizedPnl, 0),
         openPositions: open.length,
         pricedPositions: priced.length,

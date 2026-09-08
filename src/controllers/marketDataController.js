@@ -224,6 +224,7 @@ const syncPricesForAccount = async (account) => {
       id: true,
       symbol: true,
       dailyPrices: {
+        where: { volume: { not: null } },
         orderBy: { tradeDate: "desc" },
         take: 1,
         select: { tradeDate: true },
@@ -239,8 +240,8 @@ const syncPricesForAccount = async (account) => {
   const results = [];
 
   for (const security of securities) {
-    const latest = security.dailyPrices[0];
-    if (latest && latest.tradeDate.toISOString().slice(0, 10) >= today) {
+    const lastFullPrice = security.dailyPrices[0]; // newest row with open/high/low/volume
+    if (lastFullPrice && lastFullPrice.tradeDate.toISOString().slice(0, 10) >= today) {
       results.push({ symbol: security.symbol, skipped: "already current" });
       continue;
     }

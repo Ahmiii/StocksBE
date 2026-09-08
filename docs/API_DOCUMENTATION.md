@@ -781,6 +781,10 @@ Example: `GET /portfolio/c47b…/positions?from=2025-09-05&to=2026-09-05`
         "avgCost": 102.5,
         "lastPrice": 118.4,
         "priceAsOf": "2026-09-04",
+        "previousClose": 117.9,
+        "previousCloseDate": "2026-09-03",
+        "dayChange": 275,
+        "dayChangePct": 0.42,
         "investedValue": 56375,
         "marketValue": 65120,
         "unrealizedPnl": 8745,
@@ -798,6 +802,11 @@ Example: `GET /portfolio/c47b…/positions?from=2025-09-05&to=2026-09-05`
       "marketValue": 65120,
       "unrealizedPnl": 8745,
       "unrealizedPct": 15.51,
+      "dayChange": 275,
+      "dayChangePct": 0.42,
+      "dayChangeAsOf": "2026-09-04",
+      "dayChangeFrom": "2026-09-03",
+      "dayChangeCoverage": 100,
       "realizedPnl": 1200,
       "openPositions": 1,
       "pricedPositions": 1,
@@ -811,6 +820,8 @@ Example: `GET /portfolio/c47b…/positions?from=2025-09-05&to=2026-09-05`
 |---|---|
 | `investedValue` | `quantity × avgCost` |
 | `lastPrice` / `priceAsOf` | Newest row in `daily_prices` for that stock. `null` if we have no price yet. |
+| `previousClose` / `dayChange` / `dayChangePct` | The price row before the newest one, and `quantity × (lastPrice − previousClose)`. All `null` when the stock has only one price row, or when its newest price is older than the newest price in the portfolio (a delisted stock like ENGRO has no "today"). "Previous" means the previous row, so a Monday compares with Friday. |
+| `summary.dayChange` / `dayChangePct` / `dayChangeAsOf` / `dayChangeFrom` | The rupee changes added up, as a percent of what those holdings were worth the day before (weighted, not an average of percents), the trading day they belong to, and the day they are measured from (`previousCloseDate` on the rows; Friday on a Monday). The app writes the caption from it: "vs Fri 4 Sept close". `dayChangeCoverage` is the share of market value that had a price for that day: on the evening of a sync the broker has priced the held stocks but the provider's bars for the smaller ones arrive later, so it can sit below 100% for a few hours. The app shows "today" only when `dayChange` is not null and adds "N% of holdings" when coverage is under 95%. |
 | `marketValue` | `quantity × lastPrice` (or `null`) |
 | `unrealizedPnl` | `marketValue − investedValue` (or `null`) |
 | `unrealizedPct` | `unrealizedPnl / investedValue × 100` (or `null`) |
@@ -1487,7 +1498,7 @@ These are facts about the code as it is today. They are listed so nobody is surp
 11. `trades.taxes_levies` is always 0; all charges are lumped into `commission`.
 12. Trade `executed_at` only has the date (UTC midnight); the broker does not give a time.
 13. The trade fingerprint (section 10.3) depends on the broker's row values. If the broker later changes any value or the date format for old rows, those trades would be imported again as "new".
-14. The broker sync writes today's `daily_prices` row with only `close` (from `mtmPrice`), under today's **UTC** date even on weekends. Because the market sync uses `skipDuplicates`, it will not overwrite that row with full open/high/low/volume later.
+14. The broker sync writes today's `daily_prices` row with only `close` (from `mtmPrice`), under today's **UTC** date even on weekends. Because the market sync uses `skipDuplicates`, it will not overwrite that row with full open/high/low/volume later. Fixed on 2026-09-09: the price sync now judges "already current" by the newest **provider** row (`volume` not null), so a broker close-only row for today no longer stops the fetch that back-fills the provider's earlier days. Before that fix, the seven broker-priced holdings were missing Monday 7 Sept entirely.
 15. Positions computed only from trades can go negative if sells exceed buys (e.g. bonus shares that never appeared as a buy). The broker's holdings usually correct this via `mergePositions`.
 
 **API design**
