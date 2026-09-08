@@ -1346,7 +1346,7 @@ If the market API answers `401` mid-run, the cached cookie is thrown away so the
 
 ### 10.6 Nightly sync
 
-`src/jobs/dailySync.js`, started from `server.js`. On weekdays at **17:30 Asia/Karachi** (`SYNC_SCHEDULE` in `constants.js`) it takes every broker account that has a stored password and is not disconnected, and for each one:
+`src/jobs/dailySync.js`, started from `server.js`. On weekdays it runs **once, at a random time between 18:00 and 23:00 Asia/Karachi** (`SYNC_START_HOUR` and `SYNC_JITTER_MINUTES` in `constants.js`: the job wakes at 18:00 and waits a random slice of the window). If the server starts after 18:00 and no account has synced today, because a restart killed the pending run, it catches up within five minutes. For every broker account that has a stored password and is not disconnected, it does:
 
 1. `brokerLogin` with the decrypted password (`src/utils/secrets.js`, AES-256-GCM, key from `CREDENTIALS_KEY`);
 2. `syncAccount` — the same code as `POST /broker/accounts/:id/sync`: trades, holdings, positions, today's close from `mtmPrice`;
@@ -1357,6 +1357,17 @@ If the market API answers `401` mid-run, the cached cookie is thrown away so the
 ### 10.7 Token endpoints on the analytics API
 
 Some dashboard endpoints (`company-statement` for fundamentals, `payouts/*`, `news/*`) need a **bearer token as well as the cookie**. Every dashboard page embeds a fresh token in `<meta name="access-token">`, and the previous one stops working. `fetchDashboardApi(path, params, account)` in `marketDataController.js` loads one page per market session to read it, caches it next to the cookie, and on a 401 (a browser tab rotated it) fetches a new one and retries once. Nothing uses it yet; fundamentals are next on the roadmap.
+
+### 10.8 Looking like the browser
+
+The provider sees one account fetching its own data once a day, which is what a person does; the point is not to *look* like a script. Four rules, all in `marketDataController.js` and `src/utils/pace.js`:
+
+- **Same headers as Chrome on every call** (`apiHeaders`): the browser user-agent, `Accept-Language`, `sec-ch-ua`, `X-Requested-With`, and a `Referer` of the company page the call belongs to (`/research/company/FFC` for FFC's bars). Before this, the price and token calls went out with `User-Agent: axios/1.20.0`.
+- **Irregular pacing**: one to three seconds between symbols (`pauseBetweenCalls`), never a fixed interval, never in parallel.
+- **A different time every evening** for the nightly job, anywhere in a five-hour window (section 10.6).
+- **Stop for the day** on a 429 or a 5xx (`providerSaysStop`): the loop breaks instead of retrying, and the next run is tomorrow's.
+
+Total footprint on a normal night: about 25 price calls spread over a minute, once a day, from one account.
 
 ## 11. How positions are calculated
 

@@ -49,9 +49,13 @@ const SYNC_STATUS = {
   DISCONNECTED: "disconnected",
 };
 
-// Nightly sync: weekdays at 17:30 Karachi time, after the market closes.
-const SYNC_SCHEDULE = "30 17 * * 1-5";
+// Nightly sync: some time between 18:00 and 23:00 Karachi time on weekdays.
+// The job wakes at SYNC_START_HOUR and waits a random slice of the window,
+// so it runs at a different time every evening.
 const SYNC_TIMEZONE = "Asia/Karachi";
+const SYNC_START_HOUR = 18;
+const SYNC_JITTER_MINUTES = 5 * 60;
+const SYNC_SCHEDULE = `0 ${SYNC_START_HOUR} * * 1-5`;
 
 // Path the login form posts to, relative to BROKER_URL.
 const BROKER_LOGIN_PATH = "/Home/_Login";
@@ -95,6 +99,8 @@ export {
   SYNC_STATUS,
   SYNC_SCHEDULE,
   SYNC_TIMEZONE,
+  SYNC_START_HOUR,
+  SYNC_JITTER_MINUTES,
   BROKER_LOGIN_PATH,
   BROKER_HISTORY_PATH,
   BROKER_COLLATERALS_PATH,

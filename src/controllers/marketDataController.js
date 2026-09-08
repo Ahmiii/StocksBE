@@ -11,6 +11,7 @@ import {
 } from "../config/constants.js";
 import { buildCookieHeader, parseSetCookies } from "../utils/extractAHLInfor.js";
 import { parseDateRange, formatDate } from "../utils/dateRange.js";
+import { pauseBetweenCalls, providerSaysStop } from "../utils/pace.js";
 import {
   getSession,
   saveMarketSession,
@@ -19,6 +20,20 @@ import {
 } from "../services/brokderSessionStore.js";
 
 const DASHBOARD_URL = process.env.DASHBOARD_URL;
+const DASHBOARD_HOME = DASHBOARD_URL ? new URL(DASHBOARD_URL).origin : "";
+
+// The page a browser would be on when it makes a given API call. Sent as the
+// Referer so our calls look like the dashboard's own.
+const pageFor = (symbol) =>
+  symbol ? `${DASHBOARD_HOME}/research/company/${symbol}` : `${DASHBOARD_HOME}/`;
+
+// Every API call carries the same headers Chrome sends from the dashboard.
+const apiHeaders = (symbol, extra) => ({
+  ...BROWSER_HEADERS,
+  ...AJAX_HEADERS,
+  Referer: pageFor(symbol),
+  ...extra,
+});
 
 // Manual fallback: a laravel_session copied out of the browser. Only used when
 // there is no live broker session to run the handoff with.
@@ -141,13 +156,10 @@ const getMarketCookie = async ({ brokerAccountId, clientCode }) => {
 // One call to the market API. `path` is what the dashboard passes through,
 // e.g. "/daily/FFC".
 const fetchMarket = async (path, cookieHeader) => {
+  const symbol = path.split("/")[2]; // "/daily/FFC" -> "FFC"
   const response = await axios.get(`${DASHBOARD_URL}/market`, {
     params: { path },
-    headers: {
-      accept: "*/*",
-      "x-requested-with": "XMLHttpRequest",
-      cookie: cookieHeader,
-    },
+    headers: apiHeaders(symbol, { cookie: cookieHeader }),
   });
 
   // The API also returns a "count" field, but it is unreliable (0 even when
@@ -243,9 +255,11 @@ const syncPricesForAccount = async (account) => {
         symbol: security.symbol,
         error: error.response?.status ?? error.message,
       });
+      // Rate limited or the provider is down: do not keep knocking.
+      if (providerSaysStop(error)) break;
     }
 
-    await new Promise((resolve) => setTimeout(resolve, 400));
+    await pauseBetweenCalls();
   }
 
   return {
@@ -286,9 +300,6 @@ const syncPrices = async (req, res) => {
 /* fetched once per market session and refreshed once on a 401.               */
 /* -------------------------------------------------------------------------- */
 
-// The dashboard's page host; the API lives under /api/v3 of the same host.
-const DASHBOARD_HOME = DASHBOARD_URL ? new URL(DASHBOARD_URL).origin : "";
-
 const fetchAccessToken = async (cookieHeader) => {
   const response = await axios.get(`${DASHBOARD_HOME}/`, {
     headers: { ...BROWSER_HEADERS, ...NAVIGATION_HEADERS, cookie: cookieHeader },
@@ -318,19 +329,21 @@ const getMarketAuth = async ({ brokerAccountId, clientCode }) => {
 // GET on a token endpoint, e.g.
 //   fetchDashboardApi("/company-statement",
 //     { symbol: "LCI", interval: "annual", type: "fundamentals" }, account)
-// where account is { brokerAccountId, clientCode }.
+// where account is { brokerAccountId, clientCode }. The Referer is the
+// company page the browser would be on: the symbol from the params, or the
+// end of the path (…/LCI).
 const fetchDashboardApi = async (path, params, account, retry = true) => {
   const { cookieHeader, accessToken } = await getMarketAuth(account);
+  const last = path.split("/").pop();
+  const symbol = params?.symbol ?? (/^[A-Z0-9]+$/.test(last) ? last : null);
 
   try {
     const response = await axios.get(`${DASHBOARD_URL}${path}`, {
       params,
-      headers: {
-        ...AJAX_HEADERS,
-        accept: "*/*",
+      headers: apiHeaders(symbol, {
         cookie: cookieHeader,
         authorization: `Bearer ${accessToken}`,
-      },
+      }),
     });
     return response.data?.data ?? response.data;
   } catch (error) {

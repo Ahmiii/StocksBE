@@ -18,7 +18,7 @@
 ### 0.2 Scheduled sync — M
 - **Why:** today nothing updates unless someone opens the app and the broker session (15 min) is alive. Analytics on stale prices is wrong analytics.
 - **Decision to make:** unattended sync needs a broker login without you present. Either store the broker password encrypted (`credentialsEnc` already exists, unused) or accept that sync only runs while the app has recently linked. For a personal app, encrypt-at-rest with a key in `.env` is reasonable.
-- **Backend:** `node-cron` job at 17:30 PKT on weekdays: broker login → trade sync → price sync (held + watched + indices) → fundamentals refresh for held symbols weekly. Log each run to a `sync_runs` table (started, finished, counts, error).
+- **Backend (as built):** `node-cron` job on weekdays at a random time between 18:00 and 23:00 PKT, with a catch-up at startup if a restart ate the evening's run: broker login → trade sync → price sync. Status and time on the broker account row instead of a `sync_runs` table.
 - **App:** Portfolio header shows "Synced 17:32" from the last run instead of the static "Sync now" label.
 - **Done when:** the app opens on a Monday morning with Friday's closes already there.
 
