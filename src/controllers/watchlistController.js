@@ -1,6 +1,7 @@
 import { prisma } from "../config/db.js";
 import { getMarketSession } from "../services/brokderSessionStore.js";
-import { fetchMarket, savePrices } from "./marketDataController.js";
+import { fetchMarket } from "../services/dashboardApi.js";
+import { savePrices } from "./marketDataController.js";
 
 const BENCHMARK_SYMBOL = "KSE100";
 

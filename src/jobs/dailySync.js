@@ -90,9 +90,6 @@ const karachiNow = () => {
   return { today, hour, isWeekday: weekday >= 1 && weekday <= 5 };
 };
 
-// A restart during the evening wait kills the pending run. If the server
-// comes up after the window opened and nothing has synced today, catch up
-// in a few minutes instead of waiting for tomorrow.
 const catchUpIfMissed = async () => {
   const { today, hour, isWeekday } = karachiNow();
   if (!isWeekday || hour < SYNC_START_HOUR) return;

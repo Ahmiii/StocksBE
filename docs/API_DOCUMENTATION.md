@@ -154,10 +154,12 @@ Backend/
 │   │   ├── authController.js    # register, login
 │   │   ├── brokerAccountController.js # link broker, list, disconnect, sync trades
 │   │   ├── portfolioController.js # portfolio list, positions, trades, benchmark vs KSE100
-│   │   ├── marketDataController.js # price sync, securities import + search, trend chart
+│   │   ├── marketDataController.js # price sync, securities import + search, trend chart (provider calls live in services/dashboardApi.js)
+│   │   ├── corporateActionController.js # payouts from the provider (dividends, bonus, splits — in progress)
 │   │   └── watchlistController.js # watchlist list / add / remove
 │   ├── services/
-│   │   └── brokderSessionStore.js # In-memory store for broker + market cookies
+│   │   ├── brokderSessionStore.js # In-memory store for broker + market cookies
+│   │   └── dashboardApi.js      # Talking to the Arif Habib dashboard: handoff, token, price feed, token endpoints
 │   ├── utils/
 │   │   ├── extractAHLInfor.js   # Parses broker HTML/cookies, builds login form body
 │   │   ├── tradeData.js         # Normalises trades, calculates/merges/reconciles positions
