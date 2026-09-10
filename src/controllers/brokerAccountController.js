@@ -28,6 +28,7 @@ import {
 } from "../services/brokderSessionStore.js";
 import {
   calculatePositions,
+  applyMergers,
   mergePositions,
   reconcilePositions,
   normalizeTradeRows,
@@ -440,7 +441,14 @@ const syncAccount = async ({ account, session, params }) => {
     orderBy: { exDate: "asc" },
   });
 
-  const computed = calculatePositions(allTrades,shareChanges);
+  // a stock swapped into another one, like ENGRO into ENGROH
+  const mergers = await prisma.corporateAction.findMany({
+    where: { type: "MERGER" },
+    orderBy: { exDate: "asc" },
+  });
+
+  const updatedPositions = calculatePositions(allTrades, shareChanges);
+  const computed = applyMergers(updatedPositions, mergers);
 
   const posotion = mergePositions({
     computed,

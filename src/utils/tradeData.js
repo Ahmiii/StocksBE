@@ -171,3 +171,33 @@ export const calculatePositions = (trades, shareChanges) => {
   });
   return parsData;
 };
+
+//move shares of a stock that is swapped in to another stock like ENGRO in to ENGROH
+export const applyMergers = (positions, mergers) => {
+  for (const merger of mergers) {
+    let oldStock;
+    let newStock;
+    for (const position of positions) {
+      if (position.securityId === merger.securityId) {
+        oldStock = position;
+      }
+      if (position.securityId === merger.toSecurityId) {
+        newStock = position;
+      }
+    }
+    if (!oldStock || oldStock.quantity === 0) {
+      continue;
+    }
+    if (!newStock) {
+      newStock = { securityId: merger.toSecurityId, quantity: 0, avgCost: 0, realizePnl: 0 };
+      positions.push(newStock);
+    }
+    //same money new share count, fraction of a share is paid in cash
+    const totalCost = oldStock.quantity * oldStock.avgCost + newStock.quantity * newStock.avgCost;
+    newStock.quantity = newStock.quantity + Math.floor(oldStock.quantity * Number(merger.ratio));
+    newStock.avgCost = totalCost / newStock.quantity;
+    oldStock.quantity = 0;
+    oldStock.avgCost = 0;
+  }
+  return positions;
+};
