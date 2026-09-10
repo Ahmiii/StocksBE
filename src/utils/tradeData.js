@@ -58,7 +58,11 @@ export const normalizeTradeRows = (rows) => {
 //
 // realizedPnl always comes from the trade walk: collaterals reports plSettled
 // as 0 and knows nothing about closed positions.
-export const mergePositions = ({ computed, collaterals, securityIdBySymbol }) => {
+export const mergePositions = ({
+  computed,
+  collaterals,
+  securityIdBySymbol,
+}) => {
   const bySecurityId = new Map(
     (computed ?? []).map((p) => [p.securityId, { ...p, source: "trades" }]),
   );
@@ -83,7 +87,11 @@ export const mergePositions = ({ computed, collaterals, securityIdBySymbol }) =>
 // Symbols where the broker's share count disagrees with ours. A positive delta
 // with a matching cost basis means a split or bonus we never saw; a negative one
 // means either shares sitting in the sub-investor account or a missed sell.
-export const reconcilePositions = ({ computed, collaterals, securityIdBySymbol }) => {
+export const reconcilePositions = ({
+  computed,
+  collaterals,
+  securityIdBySymbol,
+}) => {
   const bySecurityId = new Map((computed ?? []).map((p) => [p.securityId, p]));
   const mismatches = [];
 
@@ -106,20 +114,34 @@ export const reconcilePositions = ({ computed, collaterals, securityIdBySymbol }
       impliedRatio: Number((brokerQty / ours.quantity).toFixed(6)),
       // Unchanged total cost is the signature of a split or bonus rather than a
       // trade we failed to import.
-      costBasisMatches: Math.abs(ourCost - brokerCost) < Math.max(1, ourCost * 0.001),
+      costBasisMatches:
+        Math.abs(ourCost - brokerCost) < Math.max(1, ourCost * 0.001),
     });
   }
 
   return mismatches;
 };
-
-export const calculatePositions = (trades) => {
+//callculate position considering all trades and share changes like bonus share and split of share
+export const calculatePositions = (trades, shareChanges) => {
   let groupedData = Object.groupBy(trades, (trade) => trade.securityId);
   let parsData = Object.entries(groupedData).map(([key, value]) => {
     let stockQty = 0;
     let avgCost = 0;
     let realizePnl = 0;
-    value.forEach((element) => {
+    let previousTradeDate = new Date(0); // start of time
+
+    for (const element of value) {
+      // Splits and bonuses that happened between the previous trade and this one.
+      for (const change of shareChanges) {
+        if (change.securityId !== key) continue;
+        if (change.exDate > previousTradeDate && change.exDate <= element.executedAt) {
+          const totalCost = avgCost * stockQty;
+          stockQty = Math.floor(stockQty * Number(change.ratio));
+          avgCost = stockQty > 0 ? totalCost / stockQty : 0;
+        }
+      }
+      previousTradeDate = element.executedAt;
+
       const qty = Number(element?.quantity);
       const price = Number(element?.price);
       const commission = Number(element?.commission);
@@ -132,7 +154,18 @@ export const calculatePositions = (trades) => {
         realizePnl = realizePnl + (proceeds - avgCost * qty);
         stockQty = stockQty - qty;
       }
-    });
+    }
+
+    // Splits and bonuses after the last trade, like the BAFL split.
+    for (const change of shareChanges) {
+      if (change.securityId !== key) continue;
+      if (change.exDate > previousTradeDate) {
+        const totalCost = avgCost * stockQty;
+        stockQty = Math.floor(stockQty * Number(change.ratio));
+        avgCost = stockQty > 0 ? totalCost / stockQty : 0;
+      }
+    }
+
     if (stockQty === 0) avgCost = 0;
     return { securityId: key, quantity: stockQty, avgCost, realizePnl };
   });

@@ -117,7 +117,7 @@ const getAllSecuritiesPayoutPerAccount = async (account) => {
   }
   let totalSaved = 0;
   for (const result of allSecurityPayout) {
-    totalSaved = totalSaved + result.saved ?? 0;
+    totalSaved +=  result.saved ?? 0;
   }
   return {
     securities: allSecurityPayout.length,

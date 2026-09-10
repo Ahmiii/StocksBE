@@ -360,9 +360,8 @@ const syncAccount = async ({ account, session, params }) => {
 
   // Collaterals is an enhancement, not a requirement — a bad response there
   // should not lose the trade sync.
-  const collateralRows = collateral.isJson && Array.isArray(collateral.data)
-    ? collateral.data
-    : [];
+  const collateralRows =
+    collateral.isJson && Array.isArray(collateral.data) ? collateral.data : [];
 
   const data = normalizeTradeRows(history?.data);
 
@@ -435,7 +434,13 @@ const syncAccount = async ({ account, session, params }) => {
     },
     orderBy: { executedAt: "asc" },
   });
-  const computed = calculatePositions(allTrades);
+  //changes in share like give bonus share or split of share
+  const shareChanges = await prisma.corporateAction.findMany({
+    where: { type: { in: ["BONUS_SHARE", "SPLIT"] } },
+    orderBy: { exDate: "asc" },
+  });
+
+  const computed = calculatePositions(allTrades,shareChanges);
 
   const posotion = mergePositions({
     computed,
@@ -481,7 +486,9 @@ const syncAccount = async ({ account, session, params }) => {
   tradeDate.setUTCHours(0, 0, 0, 0);
 
   const priceUpsert = collateralRows
-    .filter((row) => securityIdBySymbol.get(row?.symbol) && row?.mtmPrice != null)
+    .filter(
+      (row) => securityIdBySymbol.get(row?.symbol) && row?.mtmPrice != null,
+    )
     .map((row) =>
       prisma.dailyPrice.upsert({
         where: {
@@ -507,7 +514,8 @@ const syncAccount = async ({ account, session, params }) => {
       trades: tradesRes.length,
       positions: posotion.length,
       prices: priceUpsert.length,
-      fromCollaterals: posotion.filter((p) => p.source === "collaterals").length,
+      fromCollaterals: posotion.filter((p) => p.source === "collaterals")
+        .length,
       fromTrades: posotion.filter((p) => p.source === "trades").length,
       mismatches,
       from: params.fromdate,

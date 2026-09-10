@@ -16,6 +16,7 @@ import {
 } from "../controllers/brokerAccountController.js";
 import { syncPricesForAccount } from "../controllers/marketDataController.js";
 import { saveSession } from "../services/brokderSessionStore.js";
+import { getAllSecuritiesPayoutPerAccount } from "../controllers/corporateActionController.js";
 
 // The nightly routine for one account: log in with the stored password, pull
 // trades and holdings, then fetch the missing price bars.
@@ -26,7 +27,10 @@ const syncOneAccount = async (account) => {
   });
   if (!login.ok) throw new Error(login.error);
 
-  const session = { sessionCookie: login.sessionCookie, cookieJar: login.cookieJar };
+  const session = {
+    sessionCookie: login.sessionCookie,
+    cookieJar: login.cookieJar,
+  };
   saveSession(account.id, session);
 
   const trades = await syncAccount({
@@ -37,16 +41,21 @@ const syncOneAccount = async (account) => {
   if (!trades.ok) throw new Error(trades.error);
 
   const prices = await syncPricesForAccount(account);
+  const payouts = await getAllSecuritiesPayoutPerAccount(account);
 
   return {
     trades: trades.data.trades,
     positions: trades.data.positions,
     newPriceRows: prices.newRows,
+    corporateActions: payouts.saved,
   };
 };
 
 const markStatus = (accountId, syncStatus) =>
-  prisma.brokerAccount.update({ where: { id: accountId }, data: { syncStatus } });
+  prisma.brokerAccount.update({
+    where: { id: accountId },
+    data: { syncStatus },
+  });
 
 // Every account with a stored password, one after another.
 const runDailySync = async () => {
@@ -84,7 +93,9 @@ const karachiNow = () => {
   const now = new Date();
   const today = now.toLocaleDateString("en-CA", { timeZone: SYNC_TIMEZONE });
   const hour = Number(
-    now.toLocaleTimeString("en-GB", { timeZone: SYNC_TIMEZONE, hour12: false }).slice(0, 2),
+    now
+      .toLocaleTimeString("en-GB", { timeZone: SYNC_TIMEZONE, hour12: false })
+      .slice(0, 2),
   );
   const weekday = new Date(`${today}T00:00:00Z`).getUTCDay(); // 0 = Sunday, 6 = Saturday
   return { today, hour, isWeekday: weekday >= 1 && weekday <= 5 };
@@ -104,7 +115,9 @@ const catchUpIfMissed = async () => {
   });
   if (missed === 0) return;
 
-  console.log(`[sync] ${missed} account(s) not synced today; catching up in a few minutes`);
+  console.log(
+    `[sync] ${missed} account(s) not synced today; catching up in a few minutes`,
+  );
   await pause(60 * 1000, 5 * 60 * 1000);
   await runDailySync();
 };
@@ -112,14 +125,18 @@ const catchUpIfMissed = async () => {
 // Called once when the server starts.
 const startDailySync = () => {
   if (!canStoreSecrets()) {
-    console.warn("[sync] CREDENTIALS_KEY is not set, so the nightly sync is off.");
+    console.warn(
+      "[sync] CREDENTIALS_KEY is not set, so the nightly sync is off.",
+    );
     return;
   }
   cron.schedule(SYNC_SCHEDULE, runAtARandomTime, { timezone: SYNC_TIMEZONE });
   console.log(
     `[sync] scheduled: weekdays between ${SYNC_START_HOUR}:00 and ${SYNC_START_HOUR + SYNC_JITTER_MINUTES / 60}:00 ${SYNC_TIMEZONE}`,
   );
-  catchUpIfMissed().catch((error) => console.error("[sync] catch-up failed:", error.message));
+  catchUpIfMissed().catch((error) =>
+    console.error("[sync] catch-up failed:", error.message),
+  );
 };
 
 const fullSyncNow = async (req, res) => {
@@ -127,10 +144,12 @@ const fullSyncNow = async (req, res) => {
     where: { id: req.params.id, userId: req.user.id },
     select: { id: true, clientCode: true, credentialsEnc: true },
   });
-  if (!account) return res.status(404).json({ error: "account does not exist" });
+  if (!account)
+    return res.status(404).json({ error: "account does not exist" });
   if (!account.credentialsEnc) {
     return res.status(400).json({
-      error: "No stored password for this account. Link it again to enable sync.",
+      error:
+        "No stored password for this account. Link it again to enable sync.",
     });
   }
 
@@ -144,4 +163,11 @@ const fullSyncNow = async (req, res) => {
   }
 };
 
-export { syncOneAccount, runDailySync, startDailySync, catchUpIfMissed, karachiNow, fullSyncNow };
+export {
+  syncOneAccount,
+  runDailySync,
+  startDailySync,
+  catchUpIfMissed,
+  karachiNow,
+  fullSyncNow,
+};
