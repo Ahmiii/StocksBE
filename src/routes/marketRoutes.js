@@ -6,7 +6,10 @@ import {
   searchSecurities,
   getTrend,
 } from "../controllers/marketDataController.js";
-import { getSecuritiesPayout } from "../controllers/corporateActionController.js";
+import {
+  getSingleSecuritiesPayout,
+  getBulkSecuritiesPayout,
+} from "../controllers/corporateActionController.js";
 import { authMiddleware } from "../middlewares/authMiddleware.js";
 
 const router = express.Router();
@@ -17,6 +20,6 @@ router.post("/securities/:id", syncSecurities);
 router.post("/sync/:id", syncPrices);
 router.get("/prices/:symbol", getPrices);
 router.get("/trend/:symbol", getTrend);
-router.get("/payouts/:symbol", getSecuritiesPayout);
-
+router.get("/payouts/:symbol", getSingleSecuritiesPayout);
+router.post("/getbulkpayouts/sync/:id", getBulkSecuritiesPayout);
 export default router;

@@ -122,7 +122,6 @@ const startDailySync = () => {
   catchUpIfMissed().catch((error) => console.error("[sync] catch-up failed:", error.message));
 };
 
-// POST /broker/accounts/:id/full-sync — the nightly routine, right now.
 const fullSyncNow = async (req, res) => {
   const account = await prisma.brokerAccount.findFirst({
     where: { id: req.params.id, userId: req.user.id },
