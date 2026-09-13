@@ -3,7 +3,7 @@
 > One document that explains **what this backend does, how it is built, how the database is shaped, and how to call every API**.
 > Written in simple English so a new developer or a frontend developer can read it without opening the code.
 
-**Project:** `stock_portfolio_be` · **Author:** Ahmed Faraz · **Last updated:** 2026-09-04
+**Project:** `stock_portfolio_be` · **Author:** Ahmed Faraz · **Last updated:** 2026-09-13
 
 ---
 
@@ -135,7 +135,7 @@ All variables live in `.env` (which is git-ignored — never commit it).
 Backend/
 ├── prisma/
 │   ├── schema.prisma            # Database models (source of truth for tables)
-│   └── migrations/              # SQL migration history (9 migrations)
+│   └── migrations/              # SQL migration history (10 migrations)
 ├── prisma7.config.ts            # Prisma 7 config: schema path, migrations path, DB URL
 ├── src/
 │   ├── server.js                # Entry point: creates Express app, mounts routes, handles shutdown
@@ -153,9 +153,9 @@ Backend/
 │   ├── controllers/
 │   │   ├── authController.js    # register, login
 │   │   ├── brokerAccountController.js # link broker, list, disconnect, sync trades
-│   │   ├── portfolioController.js # portfolio list, positions, trades, benchmark vs KSE100
+│   │   ├── portfolioController.js # portfolio list, positions, trades, benchmark vs KSE100, dividend income
 │   │   ├── marketDataController.js # price sync, securities import + search, trend chart (provider calls live in services/dashboardApi.js)
-│   │   ├── corporateActionController.js # payouts from the provider (dividends, bonus, splits — in progress)
+│   │   ├── corporateActionController.js # payouts from the provider (dividends, bonus, rights) → corporate_actions, one stock or every held + watched stock
 │   │   └── watchlistController.js # watchlist list / add / remove
 │   ├── services/
 │   │   ├── brokderSessionStore.js # In-memory store for broker + market cookies
@@ -165,8 +165,13 @@ Backend/
 │   │   ├── tradeData.js         # Normalises trades, calculates/merges/reconciles positions
 │   │   ├── dateRange.js         # Parses ?from=&to= (shared by positions and price history)
 │   │   ├── benchmark.js         # Split detection, daily walk (TWR + KSE100 shadow), XIRR, per-stock alpha
+│   │   ├── dividendIncon.js     # Shares held on a date; dividends you were entitled to (section 11.3, endpoint 22)
+│   │   ├── pace.js              # Random pauses between provider calls, stop on 429 / 5xx (section 10.8)
+│   │   ├── secrets.js           # AES-256-GCM encrypt / decrypt for the stored broker password
 │   │   ├── generateToken.js     # Signs the JWT and sets a cookie
 │   │   └── test.js              # Old experiment script — NOT used by the server (see section 14)
+│   ├── jobs/
+│   │   └── dailySync.js         # Nightly sync: weekdays at a random time 18:00–23:00 Karachi, catch-up after a restart (section 10.6)
 │   └── generated/prisma/        # Generated Prisma client (git-ignored)
 ├── package.json
 └── .env                         # Secrets (git-ignored)
@@ -237,7 +242,7 @@ flowchart LR
 
 ## 7. Database design (ERD)
 
-There are **8 tables**. UUIDs are used as primary keys everywhere except `daily_prices` (which uses a big auto-increment integer because it gets many rows). All money and quantity columns are `DECIMAL(18,4)` so there are no floating-point rounding problems.
+There are **9 tables**. UUIDs are used as primary keys everywhere except `daily_prices` (which uses a big auto-increment integer because it gets many rows). All money and quantity columns are `DECIMAL(18,4)` so there are no floating-point rounding problems.
 
 ### 7.1 Entity-relationship diagram
 
@@ -254,6 +259,8 @@ erDiagram
     securities ||--o{ daily_prices : "priced"
     users ||--o{ watchlist_items : "watches"
     securities ||--o{ watchlist_items : "watched"
+    securities ||--o{ corporate_actions : "happened to"
+    securities ||--o{ corporate_actions : "merged into"
 
     users {
         uuid id PK
@@ -268,9 +275,9 @@ erDiagram
         uuid user_id FK
         varchar(32) broker "default AHL_ETRADE"
         varchar(64) client_code "broker account number"
-        text credentials_enc "nullable, unused today"
+        text credentials_enc "encrypted broker password, nullable"
         timestamptz token_expires_at "nullable, unused today"
-        varchar(16) sync_status "idle | disconnected"
+        varchar(16) sync_status "idle | syncing | error | disconnected"
         varchar(255) sync_cursor "last 'to' date synced"
         timestamptz last_synced_at
         timestamptz created_at
@@ -342,6 +349,19 @@ erDiagram
         uuid security_id FK
         timestamptz created_at
     }
+
+    corporate_actions {
+        uuid id PK
+        uuid security_id FK
+        varchar(32) type "DIVIDEND | BONUS_SHARE | RIGHT_SHARE | SPLIT | MERGER"
+        date ex_date
+        decimal amount "nullable: Rs per share, or the right price"
+        decimal ratio "nullable: new shares per old"
+        uuid to_security_id FK "nullable, MERGER only"
+        varchar(16) source "payouts | manual"
+        varchar(32) provider_id "nullable"
+        timestamptz created_at
+    }
 ```
 
 ### 7.2 Relationships in words
@@ -385,7 +405,7 @@ These matter because the sync code relies on them for "upsert" (insert-or-update
 
 **`users`** — one row per registered person. `password_hash` is a bcrypt hash (10 salt rounds). The plain password is never stored and never returned by any API.
 
-**`broker_accounts`** — a link between a user and one account at a broker. `client_code` is the broker account number the user types in (e.g. `CC12345`). `sync_status` is `idle` normally and `disconnected` after the user unlinks. `credentials_enc` and `token_expires_at` exist in the schema but are **never written** today — the backend does not store broker passwords or cookies in the database (see [section 12](#12-in-memory-sessions)).
+**`broker_accounts`** — a link between a user and one account at a broker. `client_code` is the broker account number the user types in (e.g. `CC12345`). `sync_status` is `idle` normally, `syncing` while the nightly job or a full-sync runs, `error` when that failed, and `disconnected` after the user unlinks. `credentials_enc` holds the broker password encrypted with AES-256-GCM (`src/utils/secrets.js`, key from `CREDENTIALS_KEY`) so the nightly sync can log in unattended; it stays `null` when the key is not set, and such accounts are skipped by the job. `token_expires_at` is never written. Broker cookies are never stored in the database (see [section 12](#12-in-memory-sessions)).
 
 **`portfolios`** — a bucket of trades and positions. Today a portfolio is always created automatically when a broker account is linked, and is named `AHL <client_code>`. `base_currency` is always `PKR`.
 
@@ -398,6 +418,8 @@ These matter because the sync code relies on them for "upsert" (insert-or-update
 **`daily_prices`** — one row per stock per trading day with open/high/low/close/volume. Filled two ways: the broker sync writes today's close from the broker's `mtmPrice`; the market sync writes full OHLCV history from the analytics API.
 
 **`watchlist_items`** — one row per (user, security) the user wants to follow. It holds nothing but the link and when it was added; prices come from `daily_prices` at read time. Watched securities are automatically included in the price sync scope.
+
+**`corporate_actions`** — one row per event that changes what a share pays or how many you hold. `DIVIDEND`: `amount` is Rs per share. `BONUS_SHARE`: `ratio` is new shares per old, so a 10 % bonus is `1.1`. `RIGHT_SHARE`: `ratio` is the shares you may buy per share held and `amount` is their price; recorded, never applied, because taking up a right is a purchase you make separately. `SPLIT`: `ratio` is `2` for two-for-one. `MERGER`: `ratio` is new shares per old and `to_security_id` is the stock they became (ENGRO → ENGROH). `source` is `payouts` when the payouts sync wrote the row (section 10.6, endpoint 21) and `manual` for the rows only a person can know: the provider's feed carries dividends, bonuses and rights but **not** splits or mergers. `provider_id` is the provider's announcement id. Unique on (security, type, ex-date), so a re-sync updates a row instead of duplicating it. Read by the position rebuild (section 11.3, 11.4) and by the dividend income endpoint (22); nothing is stored back.
 
 ---
 
@@ -449,9 +471,9 @@ Every protected endpoint filters by `req.user.id`. A user can only see or change
 | 4 | GET | `/broker/accounts` | 🔒 | List my linked broker accounts |
 | 5 | PATCH | `/broker/accounts/:id/disconnect` | 🔒 | Unlink a broker account (keeps history) |
 | 6 | POST | `/broker/accounts/:id/sync` | 🔒 | Download trades + holdings and rebuild positions |
-| 7 | GET | `/portfolio/getPortfolioList` | 🔒 | List my portfolios |
-| 8 | GET | `/portfolio/:id/positions` | 🔒 | Current holdings with P&L and a summary |
-| 9 | GET | `/portfolio/:id/trades` | 🔒 | Paginated trade history |
+| 7 | GET | `/portfolio/list` | 🔒 | List my portfolios |
+| 8 | GET | `/portfolio/:id/position-list` | 🔒 | Current holdings with P&L, day change and a summary |
+| 9 | GET | `/portfolio/:id/trade-list` | 🔒 | Paginated trade history |
 | 10 | POST | `/market/sync/:id` | 🔒 | Download ~5 years of daily prices for held + watched securities and `KSE100` |
 | 11 | GET | `/market/prices/:symbol` | 🔒 | Stored daily price bars for one symbol (e.g. `KSE100`) |
 | 12 | POST | `/market/securities/:id` | 🔒 | One-time import of the broker's full approved symbol list |
@@ -461,7 +483,10 @@ Every protected endpoint filters by `req.user.id`. A user can only see or change
 | 16 | POST | `/watchlist/:securityId` | 🔒 | Add a security to my watchlist |
 | 17 | DELETE | `/watchlist/:securityId` | 🔒 | Remove a security from my watchlist |
 | 18 | GET | `/portfolio/:id/benchmark` | 🔒 | Portfolio vs `KSE100`: same-cash shadow, time-weighted chart, XIRR, per-stock alpha |
-| 19 | POST | `/broker/accounts/:id/full-sync` | 🔒 | The nightly routine on demand: log in with the stored password, then trades + prices |
+| 19 | POST | `/broker/accounts/:id/full-sync` | 🔒 | The nightly routine on demand: log in with the stored password, then trades + prices + payouts |
+| 20 | GET | `/market/payouts/:symbol` | 🔒 | Fetch one stock's dividends, bonus and right shares from the analytics API and save them to `corporate_actions` |
+| 21 | POST | `/market/getbulkpayouts/sync/:id` | 🔒 | The same for every held + watched stock, one at a time with a pause; the nightly job runs this |
+| 22 | GET | `/portfolio/:id/dividend-income` | 🔒 | Dividends you were entitled to since your first buy, per stock and in total, plus the announced ones ahead |
 
 ---
 
@@ -605,13 +630,13 @@ Lists the caller's linked broker accounts, newest first.
 }
 ```
 
-`syncStatus` is `idle` or `disconnected`. `lastSyncedAt` is `null` until the first sync.
+`syncStatus` is `idle`, `syncing`, `error` or `disconnected`. `lastSyncedAt` is `null` until the first sync.
 
 ---
 
 #### 5. `PATCH /broker/accounts/:id/disconnect` 🔒
 
-Unlinks a broker account. Sets `syncStatus` to `disconnected` and clears the (unused) stored-credential columns. **Trades, positions and the portfolio are kept.**
+Unlinks a broker account. Sets `syncStatus` to `disconnected`, clears the stored password so the nightly sync skips it, and drops the in-memory broker session. **Trades, positions and the portfolio are kept.**
 
 **Path params:** `id` — broker account UUID.
 
@@ -700,14 +725,14 @@ Example: `POST /broker/accounts/8a2e…/sync?from=2024-01-01&to=2024-12-31`
 
 #### 19. `POST /broker/accounts/:id/full-sync` 🔒
 
-Runs the nightly routine for one account right now (section 10.6): log in to the broker with the stored password, pull trades and holdings, rebuild positions, then fetch missing price bars. Use it to test the job or to refresh after market hours without waiting for 17:30.
+Runs the nightly routine for one account right now (section 10.6): log in to the broker with the stored password, pull trades and holdings, rebuild positions, fetch missing price bars, then refresh payouts into `corporate_actions`. Use it to test the job or to refresh after market hours without waiting for the evening run. Takes two to three minutes because of the pauses between provider calls.
 
 **Success — `200 OK`**
 
 ```json
 {
   "message": "success",
-  "data": { "trades": 255, "positions": 24, "newPriceRows": 21 }
+  "data": { "trades": 261, "positions": 25, "newPriceRows": 21, "corporateActions": 285 }
 }
 ```
 
@@ -723,7 +748,7 @@ Runs the nightly routine for one account right now (section 10.6): log in to the
 
 ### 9.3 Portfolio
 
-#### 7. `GET /portfolio/getPortfolioList` 🔒
+#### 7. `GET /portfolio/list` 🔒
 
 **Success — `200 OK`**
 
@@ -747,7 +772,7 @@ Runs the nightly routine for one account right now (section 10.6): log in to the
 
 ---
 
-#### 8. `GET /portfolio/:id/positions` 🔒
+#### 8. `GET /portfolio/:id/position-list` 🔒
 
 Current holdings with the latest known price and profit/loss numbers. All numbers are real JSON numbers (not strings). Optionally also returns a price **trend** per stock for a date range, for charts.
 
@@ -764,7 +789,7 @@ Each position gets a `trend` array of `{ date, close }` in oldest-first order fo
 
 **Which stocks are returned:** only those **held at some point inside the window** — the quantity at the start of `from` was above zero, or there was a BUY inside the window. So a stock bought after `to` is left out, and with the default window a stock you fully sold more than a year ago is left out too. A position with no trade rows at all (shares that only appear in the broker's holdings list) is kept while its quantity is above zero. `summary` totals only the rows returned, so for a past window it means "today's value of what I held then" — call the endpoint without dates for the headline numbers.
 
-Example: `GET /portfolio/c47b…/positions?from=2025-09-05&to=2026-09-05`
+Example: `GET /portfolio/c47b…/position-list?from=2025-09-05&to=2026-09-05`
 
 **Success — `200 OK`**
 
@@ -844,7 +869,7 @@ If the portfolio is not yours, `positions` is simply an empty array (status 200)
 
 ---
 
-#### 9. `GET /portfolio/:id/trades` 🔒
+#### 9. `GET /portfolio/:id/trade-list` 🔒
 
 Paginated list of trades, newest first.
 
@@ -857,7 +882,7 @@ Paginated list of trades, newest first.
 | `limit` | 50 | 100 | Page size. |
 | `offset` | 0 | — | How many rows to skip. |
 
-Example: `GET /portfolio/c47b…/trades?limit=20&offset=40`
+Example: `GET /portfolio/c47b…/trade-list?limit=20&offset=40`
 
 **Success — `200 OK`**
 
@@ -962,11 +987,59 @@ The maths, the verification against the live data, and the roadmap (corporate ac
 
 ---
 
+#### 22. `GET /portfolio/:id/dividend-income` 🔒
+
+What the dividends recorded in `corporate_actions` were worth to *you*: for every dividend, the shares you held the day before its ex-date times the rupees per share. Computed on read from `trades` and `corporate_actions`; nothing is stored. Gross, before the 15 % withholding tax.
+
+**Path params:** `id` — portfolio UUID. Must belong to the caller.
+
+**Success — `200 OK`** (lists abbreviated)
+
+```json
+{
+  "message": "success",
+  "data": {
+    "total": 168290,
+    "byStock": [
+      { "symbol": "FFC", "dividends": 4, "rupees": 68900 },
+      { "symbol": "HUBC", "dividends": 6, "rupees": 31828.5 }
+    ],
+    "dividends": [
+      { "symbol": "FFC", "exDate": "2025-11-04T00:00:00.000Z", "perShare": 9.5, "shares": 730, "rupees": 6935 },
+      { "symbol": "FFC", "exDate": "2026-08-10T00:00:00.000Z", "perShare": 14.5, "shares": 2210, "rupees": 32045 }
+    ],
+    "upcomingDividend": [
+      { "symbol": "LCI", "exDate": "2026-09-18T00:00:00.000Z", "ownBy": "2026-09-17T00:00:00.000Z", "perShare": 5.25, "shares": 2915, "expected": 15303.75 },
+      { "symbol": "MARI", "exDate": "2026-09-21T00:00:00.000Z", "ownBy": "2026-09-18T00:00:00.000Z", "perShare": 18.7, "shares": 1547, "expected": 28928.9 }
+    ]
+  }
+}
+```
+
+**Field guide**
+
+| Field | Meaning |
+|---|---|
+| `dividends` | Every `DIVIDEND` row with an ex-date up to today where you held shares that day. `shares` is `sharesHeldOn(trades, shareChanges, securityId, exDate)`: the trade walk (section 11) run on this stock's trades and splits dated **strictly before** the ex-date, because a share bought on the ex-date does not get the dividend. So FFC's four dividends land on 730, 1,310, 2,210 and 2,210 shares, not on today's 2,270. |
+| `byStock` | The rows above added up per stock: how many dividends and how many rupees. Not sorted; the app sorts by `rupees`. |
+| `total` | All rupees together. |
+| `upcomingDividend` | `DIVIDEND` rows with an ex-date after today, for stocks you hold. `shares` is what you hold now; `expected` is `shares × perShare` if you keep them. `ownBy` is the last weekday before the ex-date: buy on or before it to get the dividend, do not sell before the ex-date to keep it. Monday ex-dates give a Friday `ownBy`. |
+
+Limits: dividends before a stock was bought are skipped, which is most of the 250+ rows in the table. Mergers are not applied here, so ENGROH dividends after the ENGRO swap are not counted yet. Bonus shares are not listed (they change the share count, section 11.3, but pay no money).
+
+**Errors**
+
+| Status | Body | When |
+|---|---|---|
+| 404 | `{ "error": "Portfolio not found." }` | Unknown id, or not your portfolio. |
+
+---
+
 ### 9.4 Market data
 
 #### 10. `POST /market/sync/:id` 🔒
 
-Downloads daily price history (about 5 years of open/high/low/close/volume) for the securities that matter: **every stock currently held** (a position with quantity > 0), **every stock on any user's watchlist**, and the `KSE100` benchmark. The other ~500 rows in `securities` exist for search only and are never fetched. Safe to re-run: a symbol whose newest stored bar is already today (Karachi date) is skipped without making a request, and for the rest `skipDuplicates` means only new days are inserted. Requests are spaced 400 ms apart, so a sync of ~20 symbols takes about 8 seconds.
+Downloads daily price history (about 5 years of open/high/low/close/volume) for the securities that matter: **every stock currently held** (a position with quantity > 0), **every stock on any user's watchlist**, and the `KSE100` benchmark. The other ~500 rows in `securities` exist for search only and are never fetched. Safe to re-run: a symbol whose newest stored bar is already today (Karachi date) is skipped without making a request, and for the rest `skipDuplicates` means only new days are inserted. Requests are spaced one to three seconds apart (section 10.8), so a sync of ~24 symbols takes about a minute.
 
 The `:id` is a **broker account** id, because the market API needs a session that is obtained by following that account's analytics hand-off (see [section 10.5](#105-getting-market-data-prices)). If there is no live broker session but `DASHBOARD_COOKIE` is set in `.env`, that cookie is used instead.
 
@@ -1001,7 +1074,7 @@ Each item in `results` is one of `{ symbol, fetched, saved }`, `{ symbol, skippe
 | 401 | `{ "error": "The broker did not return an analytics URL." }` / `"The dashboard handoff did not return a session cookie."` | Hand-off to the analytics site failed. |
 | 404 | `{ "error": "account does not exist" }` | Not found / not yours. |
 
-> This call fetches symbols one after another with a 400 ms pause between them. With ~20 held + watched symbols it takes about 8 seconds; the HTTP request stays open until it finishes. The pacing is deliberate — a burst of requests against the analytics site looks like a scraper, a spaced sequence looks like someone browsing.
+> This call fetches symbols one after another with a random one-to-three-second pause between them. With ~24 held + watched symbols it takes about a minute; the HTTP request stays open until it finishes. The pacing is deliberate — a burst of requests against the analytics site looks like a scraper, a spaced sequence looks like someone browsing.
 
 ---
 
@@ -1164,6 +1237,77 @@ Chart `stock` and `benchmark`; show `close` in the tooltip (the real price); put
 
 ---
 
+#### 20. `GET /market/payouts/:symbol` 🔒
+
+Fetches one stock's payout announcements from the analytics API (`/payouts/announcement-break-down/SYMBOL`), keeps the published ones that have an ex-date, and upserts them into `corporate_actions` with `source = "payouts"`. One provider row can become up to three of ours: a `DIVIDEND` when `dividend > 0`, a `BONUS_SHARE` when `bonus > 0` (`ratio = 1 + bonus / 100`) and a `RIGHT_SHARE` when `rightIssue > 0` (`ratio = rightIssue / 100`, `amount = rightPrice`). A GET that writes, kept for looking at one stock; the nightly job uses endpoint 21.
+
+Needs a live market session, because this feed wants the page token as well as the cookie (section 10.7). Link the account or run `full-sync` first.
+
+**Path params:** `symbol` — case-insensitive.
+
+**Success — `200 OK`**
+
+```json
+{
+  "message": "success",
+  "data": {
+    "symbol": "SYS",
+    "count": 14,
+    "saved": 11,
+    "extractdata": [
+      { "type": "DIVIDEND", "exDate": "2026-04-01", "amount": 2, "ratio": null, "providerId": "9…" },
+      { "type": "BONUS_SHARE", "exDate": "2022-04-01", "amount": null, "ratio": 2, "providerId": "8…" }
+    ]
+  }
+}
+```
+
+`count` is rows from the provider, `saved` is rows written (published, with an ex-date). Running it twice gives the same `saved`: the unique key (security, type, ex-date) turns the second run into updates.
+
+**Errors**
+
+| Status | Body | When |
+|---|---|---|
+| 404 | `{ "error": "security does not exist" }` | Unknown symbol. |
+| 404 | `{ "error": "No broker account linked." }` | The caller has no broker account. |
+| 401 | `{ "error": "Broker session expired. Reconnect the account so a market session can be issued." }` | No live session; link or full-sync first. |
+
+---
+
+#### 21. `POST /market/getbulkpayouts/sync/:id` 🔒
+
+Endpoint 20 for every stock you hold or watch (`KSE100` excluded), one after another with a one-to-three-second pause between calls (section 10.8). A stock that fails is noted and skipped; a 429 or 5xx from the provider stops the run for the day. This is what the nightly job calls (section 10.6), so it is only needed by hand after adding to the watchlist or to refresh before the evening.
+
+**Path params:** `id` — broker account UUID. Must belong to the caller.
+
+**Success — `200 OK`** (`results` abbreviated)
+
+```json
+{
+  "message": "success",
+  "data": {
+    "securities": 24,
+    "saved": 285,
+    "results": [
+      { "symbol": "AIRLINK", "saved": 9 },
+      { "symbol": "BCL", "saved": 0 },
+      { "symbol": "ENGRO", "saved": 24 }
+    ]
+  }
+}
+```
+
+A row with `error` instead of `saved` is a stock whose call failed. ETFs come back with `saved: 0`; they do not pay through this feed. Takes about a minute for 24 stocks because of the pauses.
+
+**Errors**
+
+| Status | Body | When |
+|---|---|---|
+| 404 | `{ "error": "account does not exist" }` | Unknown id or not your account. |
+| 401 | `{ "error": "Broker session expired. …" }` | No live session; link or full-sync first. |
+
+---
+
 ### 9.5 Watchlist
 
 A per-user list of securities to follow. Items reference `securities`, so anything the search endpoint returns can be added. Watched symbols are automatically included in the price sync (endpoint 10), so they get prices on the next run.
@@ -1244,7 +1388,7 @@ Only the `watchlist_items` link row is deleted. The `securities` row and its `da
 
 ## 10. How the broker integration works
 
-The broker (AHL eTrade) has no API. The backend pretends to be a Chrome browser: it sends the same headers a browser sends, keeps the cookies the site gives back, and parses the HTML it receives. All of this lives in `brokerAccountController.js`, `marketDataController.js`, `extractAHLInfor.js` and `constants.js`.
+The broker (AHL eTrade) has no API. The backend pretends to be a Chrome browser: it sends the same headers a browser sends, keeps the cookies the site gives back, and parses the HTML it receives. All of this lives in `brokerAccountController.js`, `services/dashboardApi.js`, `marketDataController.js`, `extractAHLInfor.js` and `constants.js`.
 
 ### 10.1 Linking an account (login)
 
@@ -1351,7 +1495,7 @@ Dates from the API have no timezone; the backend takes the `YYYY-MM-DD` part as 
 
 If the market API answers `401` mid-run, the cached cookie is thrown away so the next call re-does the hand-off.
 
-**Scope and pacing.** The sync only fetches securities that are held, on a watchlist, or the benchmark. The `securities` table carries the whole exchange (~557 rows) for search, and fetching five years for every row would be hundreds of calls for data nobody views. A symbol whose newest stored bar is already today (Karachi date) is skipped without a request. Calls are spaced 400 ms apart so a sync reads as a person browsing rather than a scraper.
+**Scope and pacing.** The sync only fetches securities that are held, on a watchlist, or the benchmark. The `securities` table carries the whole exchange (~557 rows) for search, and fetching five years for every row would be hundreds of calls for data nobody views. A symbol whose newest stored bar is already today (Karachi date) is skipped without a request. Calls are spaced one to three seconds apart (section 10.8) so a sync reads as a person browsing rather than a scraper.
 
 **Securities import.** The full symbol list comes from a different endpoint on the **broker** site, `GET /Home/GetSymolsList`, using the broker session rather than the analytics one. It is a one-time import — see endpoint 12.
 
@@ -1363,24 +1507,25 @@ If the market API answers `401` mid-run, the cached cookie is thrown away so the
 
 1. `brokerLogin` with the decrypted password (`src/utils/secrets.js`, AES-256-GCM, key from `CREDENTIALS_KEY`);
 2. `syncAccount` — the same code as `POST /broker/accounts/:id/sync`: trades, holdings, positions, today's close from `mtmPrice`;
-3. `syncPricesForAccount` — the same code as `POST /market/sync/:id`: missing daily bars for held + watched symbols and `KSE100`.
+3. `syncPricesForAccount` — the same code as `POST /market/sync/:id`: missing daily bars for held + watched symbols and `KSE100`;
+4. `getAllSecuritiesPayoutPerAccount` — the same code as `POST /market/getbulkpayouts/sync/:id`: dividends, bonuses and rights for held + watched symbols into `corporate_actions`, which is how announced ex-dates ahead reach the app.
 
 `syncStatus` on the account is `syncing` while it runs, `idle` on success (with `lastSyncedAt`), `error` on failure; failures are logged to the console and the next account still runs. The app's Portfolio header shows this as "Synced 8 Sep, 17:32" / "Last sync failed". `POST /broker/accounts/:id/full-sync` runs the same routine on demand.
 
 ### 10.7 Token endpoints on the analytics API
 
-Some dashboard endpoints (`company-statement` for fundamentals, `payouts/*`, `news/*`) need a **bearer token as well as the cookie**. Every dashboard page embeds a fresh token in `<meta name="access-token">`, and the previous one stops working. `fetchDashboardApi(path, params, account)` in `marketDataController.js` loads one page per market session to read it, caches it next to the cookie, and on a 401 (a browser tab rotated it) fetches a new one and retries once. Nothing uses it yet; fundamentals are next on the roadmap.
+Some dashboard endpoints (`company-statement` for fundamentals, `payouts/*`, `news/*`) need a **bearer token as well as the cookie**. Every dashboard page embeds a fresh token in `<meta name="access-token">`, and the previous one stops working. `fetchDashboardApi(path, params, account)` in `services/dashboardApi.js` loads one page per market session to read it, caches it next to the cookie, and on a 401 (a browser tab rotated it) fetches a new one and retries once. The payouts endpoints (20, 21) use it; fundamentals are next on the roadmap.
 
 ### 10.8 Looking like the browser
 
-The provider sees one account fetching its own data once a day, which is what a person does; the point is not to *look* like a script. Four rules, all in `marketDataController.js` and `src/utils/pace.js`:
+The provider sees one account fetching its own data once a day, which is what a person does; the point is not to *look* like a script. Four rules, all in `services/dashboardApi.js` and `src/utils/pace.js`:
 
 - **Same headers as Chrome on every call** (`apiHeaders`): the browser user-agent, `Accept-Language`, `sec-ch-ua`, `X-Requested-With`, and a `Referer` of the company page the call belongs to (`/research/company/FFC` for FFC's bars). Before this, the price and token calls went out with `User-Agent: axios/1.20.0`.
 - **Irregular pacing**: one to three seconds between symbols (`pauseBetweenCalls`), never a fixed interval, never in parallel.
 - **A different time every evening** for the nightly job, anywhere in a five-hour window (section 10.6).
 - **Stop for the day** on a 429 or a 5xx (`providerSaysStop`): the loop breaks instead of retrying, and the next run is tomorrow's.
 
-Total footprint on a normal night: about 25 price calls spread over a minute, once a day, from one account.
+Total footprint on a normal night: about 25 price calls and 24 payout calls spread over two or three minutes, once a day, from one account.
 
 ## 11. How positions are calculated
 
@@ -1424,6 +1569,26 @@ For each stock in both lists, if our quantity ≠ broker quantity, a mismatch is
 
 ---
 
+### 11.3 Bonus shares and splits (`calculatePositions(trades, shareChanges)`)
+
+The walk also receives the `BONUS_SHARE` and `SPLIT` rows from `corporate_actions`, ordered by ex-date. Before each trade it applies every change dated after the previous trade and on or before this one; after the last trade it applies whatever is left (the BAFL split came after the only BAFL buy). Applying one change is three lines:
+
+```javascript
+totalCost = avgCost × heldQty
+heldQty   = floor(heldQty × ratio)        ← 33 × 2 = 66 for a 2-for-1 split
+avgCost   = totalCost / heldQty           ← 66.62 becomes 33.31; the money is unchanged
+```
+
+`floor` because 7 % of 33 shares is 2.31 and the exchange pays the 0.31 in cash. A change dated before the first buy acts on zero shares and does nothing, which is why the old bonus rows the feed carries (SYS 2019–2022, MEBL, MARI's ten-for-one in September 2024) are harmless: every one predates the purchase. Verified 2026-09-10 on the live trades: BAFL 33 → 66 shares at 66.62 → 33.31, the other 23 stocks identical.
+
+### 11.4 Mergers (`applyMergers(positions, mergers)`)
+
+After the walk, for each `MERGER` row: the old stock's shares become `floor(quantity × ratio)` shares of `to_security_id` carrying the same total cost, and the old position drops to zero. 8 ENGRO at 330.57 (Rs 2,644) became 17 ENGROH at 155.56; the 0.95 of a share was paid in cash at the time. `mergePositions` then runs as before. ENGROH sits in the sub-investor account, so the computed figures stay, ENGRO disappears from the holdings (the app lists only positions with shares) and the daily price sync picks ENGROH up because it is now held.
+
+Two limits. The merger is applied after the whole walk, not at its date, so a trade in the new stock dated after the merger would be ordered wrongly (there is none today). And `sharesHeldOn` in the dividend income (endpoint 22) does not apply mergers, so ENGROH dividends since the swap are not counted yet.
+
+---
+
 ## 12. In-memory sessions
 
 `services/brokderSessionStore.js` keeps two `Map`s in the Node process:
@@ -1435,7 +1600,7 @@ For each stock in both lists, if our quantity ≠ broker quantity, a mismatch is
 
 What this means in practice:
 
-- **Nothing about the broker login is saved to the database.** `credentials_enc` and `token_expires_at` in `broker_accounts` are never written.
+- **No cookie or token is saved to the database.** The only stored secret is `credentials_enc`, the broker password encrypted for the nightly sync (section 7.4); `token_expires_at` is never written.
 - After 15 minutes of no use, or after any **server restart**, the user must call `POST /broker/accounts` again before syncing.
 - If you run more than one server instance (load balancer, PM2 cluster), sessions are **not shared** between them.
 
@@ -1471,7 +1636,7 @@ Every endpoint, auth included, uses this shape. Clients can read `error` and sho
 | 401 | Not logged in / token problem / broker session expired / broker login wrong |
 | 404 | Broker account not found or not yours |
 | 502 | The broker website did not respond the way we expected |
-| 500 | Unexpected error. There is **no global error handler**, so Express 5 returns its default **HTML** error page, not JSON. |
+| 500 | Unexpected error. The global handler in `server.js` answers `{ "error": "Something went wrong." }` and logs the real message to the console. |
 
 ---
 
@@ -1490,9 +1655,9 @@ These are facts about the code as it is today. They are listed so nobody is surp
 
 5. ~~No input validation on `/auth/register` and `/auth/login`.~~ Fixed: missing fields, a bad email, or a password under 6 characters return `400 { "error" }`.
 6. ~~No global Express error handler → unexpected errors return HTML, not JSON.~~ Fixed: unknown routes return `404 { "error" }` and thrown errors `500 { "error": "Something went wrong." }`, logged to the console.
-7. `PATCH …/disconnect` does not clear the in-memory broker session, so `sync` keeps working for up to 15 minutes after "disconnect".
+7. ~~`PATCH …/disconnect` does not clear the in-memory broker session, so `sync` keeps working for up to 15 minutes after "disconnect".~~ Fixed: `disconnectAccount` calls `clearSession`.
 8. Broker sessions live only in memory (see section 12): lost on restart, not shared across instances.
-9. `POST /market/sync/:id` processes symbols one at a time inside a single HTTP request. It is now scoped to held + watched symbols (~20) with a 400 ms pause, so about 8 seconds — acceptable, but a background job would still be better if the watchlist grows large.
+9. `POST /market/sync/:id` and `POST /market/getbulkpayouts/sync/:id` process symbols one at a time inside a single HTTP request, with a random one-to-three-second pause between them (section 10.8), so each takes about a minute for 24 symbols. The nightly job (section 10.6) does the same work unattended, so these requests are only for a manual refresh; a long watchlist would still make them slow.
 
 **Data quality**
 
@@ -1501,16 +1666,23 @@ These are facts about the code as it is today. They are listed so nobody is surp
 12. Trade `executed_at` only has the date (UTC midnight); the broker does not give a time.
 13. The trade fingerprint (section 10.3) depends on the broker's row values. If the broker later changes any value or the date format for old rows, those trades would be imported again as "new".
 14. The broker sync writes today's `daily_prices` row with only `close` (from `mtmPrice`), under today's **UTC** date even on weekends. Because the market sync uses `skipDuplicates`, it will not overwrite that row with full open/high/low/volume later. Fixed on 2026-09-09: the price sync now judges "already current" by the newest **provider** row (`volume` not null), so a broker close-only row for today no longer stops the fetch that back-fills the provider's earlier days. Before that fix, the seven broker-priced holdings were missing Monday 7 Sept entirely.
-15. Positions computed only from trades can go negative if sells exceed buys (e.g. bonus shares that never appeared as a buy). The broker's holdings usually correct this via `mergePositions`.
+15. ~~Positions computed only from trades can go negative if sells exceed buys (e.g. bonus shares that never appeared as a buy).~~ Fixed: bonus shares, splits and mergers now come from `corporate_actions` and are applied in the walk (sections 11.3, 11.4); the broker's holdings still win for broker-held stocks via `mergePositions`.
 
 **API design**
 
 16. ~~Response shapes are not fully consistent (`message` vs `status`, `error` vs `message`, `token` location).~~ Fixed for auth: register and login now return `{ "message": "success", "data": { "user", "token" } }` and errors as `{ "error" }`. `POST /broker/accounts` still returns only `{ "data": … }`. See section 13.
-17. `GET /portfolio/:id/positions` and `/trades` return an empty list (200) for a portfolio that is not yours, instead of 404.
+17. `GET /portfolio/:id/position-list` and `/trade-list` return an empty list (200) for a portfolio that is not yours, instead of 404.
 18. The env variable is named `JWR_EXPIRES_IN` (typo). Renaming it means changing both `.env` and `generateToken.js`.
 19. `GET /market/trend/:symbol` has no `1D` period. Intraday charts need the minute feed (`/intraday/<SYMBOL>/1D` on the analytics API), which is not stored — `daily_prices` is one row per day.
 20. `GET /watchlist` gives only the day's change per row. There is no sparkline (mini 30-day line) per item; it would be a cheap addition if the UI wants one.
 21. Period windows in `GET /market/trend` are calendar-based (`6M` ≈ 183 days back), so the point count varies with holidays and listing dates rather than being fixed.
+
+**Corporate actions and dividends**
+
+22. Splits and mergers are not in the provider's payouts feed, so they are entered by hand as `manual` rows in `corporate_actions` (one `INSERT` each, or a small POST route later). Entered so far: BAFL two-for-one on 2026-04-20 and ENGRO → ENGROH at 2.24407865 on 2025-01-14. Not yet entered: LCI's five-for-one split in 2025; it predates the LCI buys so the position is right, but any per-share history that crosses it (yield) is off by five until the row exists.
+23. Payouts are synced only for held + watched stocks. A stock has no dividend history until it is held or on the watchlist, and ENGROH, held since 2026-09-10, has no rows until the next nightly sync runs.
+24. `GET /portfolio/:id/dividend-income` is gross: PSX withholds 15 % for filers before the money reaches the account. It ignores mergers (no ENGROH dividends after the swap) and does not list bonus shares received.
+25. Dividends before a split or bonus are per *old* share. Anything that sums them across such an event, a twelve-month yield for instance, must divide each one by every later ratio first. Nothing does this yet; raw BAFL sums come out about double.
 
 ---
 
@@ -1535,4 +1707,6 @@ These are facts about the code as it is today. They are listed so nobody is surp
 | **Session cookie** | The `.AspNetCore.Session` cookie the broker uses to know you are logged in. |
 | **laravel_session** | The cookie the analytics dashboard uses to know you are logged in. |
 | **Hand-off** | The one-time URL the broker gives that logs you in to the analytics dashboard without a second password. |
+| **Corporate action** | An event decided by the company that changes what a share pays or how many you hold: dividend, bonus shares, right shares, split, merger. Stored in `corporate_actions`. |
+| **Ex-date** | The first day a share trades without the announced dividend or bonus. You must own the shares before this day to get it. |
 | **TTL** | Time-to-live — how long a cached session is kept before it is thrown away. |

@@ -769,13 +769,13 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/portfolio/getPortfolioList",
+              "raw": "{{baseUrl}}/portfolio/list",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "portfolio",
-                "getPortfolioList"
+                "list"
               ]
             },
             "description": "Lists the caller's portfolios. One portfolio is created automatically per linked broker account, named `AHL <clientCode>`, base currency `PKR`.\n\nIf `portfolioId` is still empty, the test script fills it from the first portfolio."
@@ -803,13 +803,13 @@
                 "method": "GET",
                 "header": [],
                 "url": {
-                  "raw": "{{baseUrl}}/portfolio/getPortfolioList",
+                  "raw": "{{baseUrl}}/portfolio/list",
                   "host": [
                     "{{baseUrl}}"
                   ],
                   "path": [
                     "portfolio",
-                    "getPortfolioList"
+                    "list"
                   ]
                 }
               },
@@ -832,14 +832,14 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/portfolio/{{portfolioId}}/positions",
+              "raw": "{{baseUrl}}/portfolio/{{portfolioId}}/position-list",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "portfolio",
                 "{{portfolioId}}",
-                "positions"
+                "position-list"
               ],
               "query": [
                 {
@@ -881,14 +881,14 @@
                 "method": "GET",
                 "header": [],
                 "url": {
-                  "raw": "{{baseUrl}}/portfolio/{{portfolioId}}/positions",
+                  "raw": "{{baseUrl}}/portfolio/{{portfolioId}}/position-list",
                   "host": [
                     "{{baseUrl}}"
                   ],
                   "path": [
                     "portfolio",
                     "{{portfolioId}}",
-                    "positions"
+                    "position-list"
                   ]
                 }
               },
@@ -911,14 +911,14 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/portfolio/{{portfolioId}}/trades?limit=50&offset=0",
+              "raw": "{{baseUrl}}/portfolio/{{portfolioId}}/trade-list?limit=50&offset=0",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "portfolio",
                 "{{portfolioId}}",
-                "trades"
+                "trade-list"
               ],
               "query": [
                 {
@@ -958,14 +958,14 @@
                 "method": "GET",
                 "header": [],
                 "url": {
-                  "raw": "{{baseUrl}}/portfolio/{{portfolioId}}/trades?limit=20&offset=40",
+                  "raw": "{{baseUrl}}/portfolio/{{portfolioId}}/trade-list?limit=20&offset=40",
                   "host": [
                     "{{baseUrl}}"
                   ],
                   "path": [
                     "portfolio",
                     "{{portfolioId}}",
-                    "trades"
+                    "trade-list"
                   ],
                   "query": [
                     {
@@ -1055,6 +1055,70 @@
                 }
               ],
               "body": "{\n  \"message\": \"success\",\n  \"data\": {\n    \"asOf\": \"2026-09-04\",\n    \"window\": {\n      \"from\": \"2024-07-29\",\n      \"to\": \"2026-09-04\",\n      \"tradingDays\": 525\n    },\n    \"headline\": {\n      \"netCashIn\": 4461909.97,\n      \"portfolio\": 5083415.94,\n      \"benchmark\": 5454803.26,\n      \"difference\": -371387.32,\n      \"portfolioReturnOnCash\": 13.93,\n      \"benchmarkReturnOnCash\": 22.25\n    },\n    \"timeWeighted\": {\n      \"portfolio\": 60.36,\n      \"benchmark\": 122.42,\n      \"alpha\": -62.06,\n      \"maxDrawdown\": {\n        \"portfolio\": -23.62,\n        \"benchmark\": -22.57\n      }\n    },\n    \"moneyWeighted\": {\n      \"portfolioXirr\": 18.6,\n      \"benchmarkXirr\": 29.52\n    },\n    \"phases\": [\n      {\n        \"from\": \"2024-07-29\",\n        \"to\": \"2026-02-02\",\n        \"portfolio\": 66.41,\n        \"benchmark\": 134.76,\n        \"netCashInAtEnd\": 1999631.62\n      },\n      {\n        \"from\": \"2026-02-02\",\n        \"to\": \"2026-09-04\",\n        \"portfolio\": -3.64,\n        \"benchmark\": -5.26,\n        \"netCashInAtEnd\": 4461909.97\n      }\n    ],\n    \"series\": [\n      {\n        \"date\": \"2024-07-29\",\n        \"portfolio\": 100,\n        \"benchmark\": 100,\n        \"value\": 17669.62,\n        \"netCashIn\": 20027.61\n      },\n      {\n        \"date\": \"2026-09-04\",\n        \"portfolio\": 160.36,\n        \"benchmark\": 222.42,\n        \"value\": 5083415.94,\n        \"netCashIn\": 4461909.97\n      }\n    ],\n    \"positions\": [\n      {\n        \"symbol\": \"FFC\",\n        \"quantity\": 2270,\n        \"avgCost\": 499.41,\n        \"lastPrice\": 548.11,\n        \"buyDate\": \"2026-01-05\",\n        \"stockReturn\": 9.75,\n        \"benchmarkReturn\": -3.88,\n        \"alpha\": 13.63,\n        \"costBasis\": 1133660.7,\n        \"weight\": 24.15\n      }\n    ],\n    \"dataNotes\": {\n      \"adjustedSplits\": [\n        {\n          \"symbol\": \"BAFL\",\n          \"ratio\": 2,\n          \"lastPreSplitTrade\": \"2024-07-29\"\n        },\n        {\n          \"symbol\": \"SYS\",\n          \"ratio\": 5,\n          \"lastPreSplitTrade\": \"2025-05-07\"\n        }\n      ],\n      \"dividendsIncluded\": false\n    }\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Dividend income",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/portfolio/{{portfolioId}}/dividend-income",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "portfolio",
+                "{{portfolioId}}",
+                "dividend-income"
+              ]
+            },
+            "description": "Dividends you were entitled to since your first buy: for each DIVIDEND row in corporate_actions, the shares you held the day before its ex-date times the rupees per share. Computed on read, nothing stored, gross before the 15% withholding tax.\n\n`byStock` sums per stock, `dividends` is every row, `upcomingDividend` is the announced ones ahead with `ownBy` = the last weekday before the ex-date."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "const data = pm.response.json()?.data;",
+                  "pm.test('has every block', () => {",
+                  "  pm.expect(data).to.include.keys('total', 'byStock', 'dividends', 'upcomingDividend');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/portfolio/{{portfolioId}}/dividend-income",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "portfolio",
+                    "{{portfolioId}}",
+                    "dividend-income"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "body": "{\n  \"message\": \"success\",\n  \"data\": {\n    \"total\": 168290,\n    \"byStock\": [\n      {\n        \"symbol\": \"FFC\",\n        \"dividends\": 4,\n        \"rupees\": 68900\n      },\n      {\n        \"symbol\": \"HUBC\",\n        \"dividends\": 6,\n        \"rupees\": 31828.5\n      }\n    ],\n    \"dividends\": [\n      {\n        \"symbol\": \"FFC\",\n        \"exDate\": \"2025-11-04T00:00:00.000Z\",\n        \"perShare\": 9.5,\n        \"shares\": 730,\n        \"rupees\": 6935\n      }\n    ],\n    \"upcomingDividend\": [\n      {\n        \"symbol\": \"LCI\",\n        \"exDate\": \"2026-09-18T00:00:00.000Z\",\n        \"ownBy\": \"2026-09-17T00:00:00.000Z\",\n        \"perShare\": 5.25,\n        \"shares\": 2915,\n        \"expected\": 15303.75\n      }\n    ]\n  }\n}"
             }
           ]
         }
@@ -1514,6 +1578,131 @@
                 }
               ],
               "body": "{\n  \"message\": \"success\",\n  \"data\": {\n    \"symbol\": \"FFC\",\n    \"period\": \"6M\",\n    \"range\": { \"from\": \"2026-03-09\", \"to\": \"2026-09-04\" },\n    \"series\": [\n      { \"date\": \"2026-03-09\", \"close\": 471.4, \"stock\": 100, \"benchmark\": 100 },\n      { \"date\": \"2026-09-04\", \"close\": 548.11, \"stock\": 116.27, \"benchmark\": 119.69 }\n    ],\n    \"summary\": { \"stockReturn\": 16.27, \"benchmarkReturn\": 19.69, \"outperformance\": -3.42 }\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Payouts for one stock",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/market/payouts/SYS",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "market",
+                "payouts",
+                "SYS"
+              ]
+            },
+            "description": "Fetches one stock's payout announcements from the analytics API and upserts the published ones (dividends, bonus shares, right shares) into corporate_actions with source = payouts. Needs a live market session: link the account or run full-sync first. Splits and mergers are NOT in this feed."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('saved is a number', () => pm.expect(pm.response.json().data.saved).to.be.a('number'));"
+                ]
+              }
+            }
+          ],
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/market/payouts/SYS",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "market",
+                    "payouts",
+                    "SYS"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "body": "{\n  \"message\": \"success\",\n  \"data\": {\n    \"symbol\": \"SYS\",\n    \"count\": 14,\n    \"saved\": 11,\n    \"extractdata\": [\n      {\n        \"type\": \"DIVIDEND\",\n        \"exDate\": \"2026-04-01\",\n        \"amount\": 2,\n        \"ratio\": null,\n        \"providerId\": \"9…\"\n      }\n    ]\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Sync payouts for held + watched stocks",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/market/getbulkpayouts/sync/{{brokerAccountId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "market",
+                "getbulkpayouts",
+                "sync",
+                "{{brokerAccountId}}"
+              ]
+            },
+            "description": "Payouts for every held + watched stock (KSE100 excluded), one at a time with a 1–3 s pause; stops for the day on a 429 or 5xx. The nightly job runs this, so it is only needed by hand after adding to the watchlist. Takes about a minute for 24 stocks."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "const data = pm.response.json()?.data;",
+                  "pm.test('has counts', () => pm.expect(data).to.include.keys('securities', 'saved', 'results'));"
+                ]
+              }
+            }
+          ],
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/market/getbulkpayouts/sync/{{brokerAccountId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "market",
+                    "getbulkpayouts",
+                    "sync",
+                    "{{brokerAccountId}}"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "body": "{\n  \"message\": \"success\",\n  \"data\": {\n    \"securities\": 24,\n    \"saved\": 285,\n    \"results\": [\n      {\n        \"symbol\": \"AIRLINK\",\n        \"saved\": 9\n      },\n      {\n        \"symbol\": \"BCL\",\n        \"saved\": 0\n      }\n    ]\n  }\n}"
             }
           ]
         }
