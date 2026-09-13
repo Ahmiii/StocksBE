@@ -1,12 +1,17 @@
 import { prisma } from "../config/db.js";
 import { parseDateRange, formatDate } from "../utils/dateRange.js";
+import { round2 } from "../utils/portfolioFuntionHandler.js";
 import {
   detectAdjustedSplits,
   walkPortfolio,
   xirr,
   positionsVsBenchmark,
 } from "../utils/benchmark.js";
-
+import {
+  loadBenchmarkData,
+  returnBetween,
+} from "../utils/portfolioFuntionHandler.js";
+import { dividendsReceived,sharesHeldOn } from "../utils/dividendIncome.js";
 const portfolioList = async (req, res) => {
   const portfoliolist = await prisma.portfolio.findMany({
     where: {
@@ -71,7 +76,8 @@ const positionsList = async (req, res) => {
     for (const trade of tradesOfThisStock) {
       if (trade.executedAt > to) continue;
       if (trade.executedAt < from) {
-        quantityAtStart += (trade.side === "BUY" ? 1 : -1) * Number(trade.quantity);
+        quantityAtStart +=
+          (trade.side === "BUY" ? 1 : -1) * Number(trade.quantity);
       } else if (trade.side === "BUY") {
         return true;
       }
@@ -90,7 +96,10 @@ const positionsList = async (req, res) => {
     orderBy: { tradeDate: "asc" },
     select: { securityId: true, tradeDate: true, close: true },
   });
-  const trendBySecurity = Object.groupBy(pricesInRange, (price) => price.securityId);
+  const trendBySecurity = Object.groupBy(
+    pricesInRange,
+    (price) => price.securityId,
+  );
 
   // The newest price date across the holdings. A stock whose latest price is
   // older than this (a delisted one, say) has no "today" to speak of.
@@ -111,9 +120,12 @@ const positionsList = async (req, res) => {
     const marketValue = lastPrice === null ? null : quantity * lastPrice;
 
     // Day change only when this stock's newest price is as fresh as the rest.
-    const hasFreshPrice = today && today.tradeDate.getTime() === newestPriceDate?.getTime();
-    const previousClose = hasFreshPrice && previous ? Number(previous.close) : null;
-    const dayChange = previousClose === null ? null : quantity * (lastPrice - previousClose);
+    const hasFreshPrice =
+      today && today.tradeDate.getTime() === newestPriceDate?.getTime();
+    const previousClose =
+      hasFreshPrice && previous ? Number(previous.close) : null;
+    const dayChange =
+      previousClose === null ? null : quantity * (lastPrice - previousClose);
 
     return {
       id: row.id,
@@ -125,9 +137,11 @@ const positionsList = async (req, res) => {
       lastPrice,
       priceAsOf: today ? formatDate(today.tradeDate) : null,
       previousClose,
-      previousCloseDate: previousClose === null ? null : formatDate(previous.tradeDate),
+      previousCloseDate:
+        previousClose === null ? null : formatDate(previous.tradeDate),
       dayChange,
-      dayChangePct: previousClose === null ? null : (lastPrice / previousClose - 1) * 100,
+      dayChangePct:
+        previousClose === null ? null : (lastPrice / previousClose - 1) * 100,
       investedValue,
       marketValue,
       unrealizedPnl: marketValue === null ? null : marketValue - investedValue,
@@ -151,7 +165,10 @@ const positionsList = async (req, res) => {
   // Today's move: the rupee changes added up, as a percent of what those
   // holdings were worth the day before.
   const positionsWithDayChange = open.filter((p) => p.dayChange !== null);
-  const dayChange = positionsWithDayChange.reduce((sum, p) => sum + p.dayChange, 0);
+  const dayChange = positionsWithDayChange.reduce(
+    (sum, p) => sum + p.dayChange,
+    0,
+  );
   const valueBeforeToday = positionsWithDayChange.reduce(
     (sum, p) => sum + p.quantity * p.previousClose,
     0,
@@ -159,10 +176,18 @@ const positionsList = async (req, res) => {
   // How much of the portfolio the day change covers. On the evening of a sync
   // the broker has priced today's held stocks but the provider's bars for the
   // smaller ones arrive later, so this can be below 100% for a few hours.
-  const valueWithDayChange = positionsWithDayChange.reduce((sum, p) => sum + p.marketValue, 0);
-  const dayChangeCoverage = marketValue > 0 ? (valueWithDayChange / marketValue) * 100 : null;
+  const valueWithDayChange = positionsWithDayChange.reduce(
+    (sum, p) => sum + p.marketValue,
+    0,
+  );
+  const dayChangeCoverage =
+    marketValue > 0 ? (valueWithDayChange / marketValue) * 100 : null;
   // The day the change is measured from — Friday on a Monday, not "yesterday".
-  const dayChangeFrom = positionsWithDayChange.map((p) => p.previousCloseDate).sort().at(-1) ?? null;
+  const dayChangeFrom =
+    positionsWithDayChange
+      .map((p) => p.previousCloseDate)
+      .sort()
+      .at(-1) ?? null;
 
   res?.status(200)?.json({
     message: "success",
@@ -173,9 +198,11 @@ const positionsList = async (req, res) => {
         invested,
         marketValue,
         unrealizedPnl: marketValue - invested,
-        unrealizedPct: invested === 0 ? null : ((marketValue - invested) / invested) * 100,
+        unrealizedPct:
+          invested === 0 ? null : ((marketValue - invested) / invested) * 100,
         dayChange: positionsWithDayChange.length ? dayChange : null,
-        dayChangePct: valueBeforeToday > 0 ? (dayChange / valueBeforeToday) * 100 : null,
+        dayChangePct:
+          valueBeforeToday > 0 ? (dayChange / valueBeforeToday) * 100 : null,
         dayChangeAsOf: newestPriceDate ? formatDate(newestPriceDate) : null,
         dayChangeFrom,
         dayChangeCoverage,
@@ -249,75 +276,6 @@ const tradeList = async (req, res) => {
 const PHASE_CUT = "2026-02-01";
 
 // Rounds every number inside the response to 2 decimals.
-const round2 = (value) => {
-  if (typeof value === "number") return Math.round(value * 100) / 100;
-  if (Array.isArray(value)) return value.map(round2);
-  if (value && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value).map(([key, inner]) => [key, round2(inner)]),
-    );
-  }
-  return value;
-};
-
-// Trades, open positions and price history for one portfolio, as plain
-// numbers (Prisma hands Decimals back as strings).
-const loadBenchmarkData = async (portfolioId) => {
-  const tradeRows = await prisma.trade.findMany({
-    where: { portfolioId },
-    orderBy: [{ executedAt: "asc" }, { id: "asc" }],
-    select: {
-      side: true,
-      quantity: true,
-      price: true,
-      commission: true,
-      executedAt: true,
-      security: { select: { symbol: true } },
-    },
-  });
-  const trades = tradeRows.map((row) => ({
-    symbol: row.security.symbol,
-    side: row.side,
-    quantity: Number(row.quantity),
-    price: Number(row.price),
-    commission: Number(row.commission),
-    date: formatDate(row.executedAt),
-  }));
-
-  const positionRows = await prisma.position.findMany({
-    where: { portfolioId, quantity: { gt: 0 } },
-    select: { quantity: true, avgCost: true, security: { select: { symbol: true } } },
-  });
-  const positions = positionRows.map((row) => ({
-    symbol: row.security.symbol,
-    quantity: Number(row.quantity),
-    avgCost: Number(row.avgCost),
-  }));
-
-  const symbols = [...new Set(trades.map((trade) => trade.symbol)), "KSE100"];
-  const bars = await prisma.dailyPrice.findMany({
-    where: { security: { symbol: { in: symbols } } },
-    orderBy: { tradeDate: "asc" },
-    select: { tradeDate: true, close: true, security: { select: { symbol: true } } },
-  });
-  const prices = {};
-  for (const bar of bars) {
-    const symbol = bar.security.symbol;
-    if (!prices[symbol]) prices[symbol] = new Map();
-    prices[symbol].set(formatDate(bar.tradeDate), Number(bar.close));
-  }
-
-  return { trades, positions, prices };
-};
-
-// Percent change of both lines between two points of the series.
-const returnBetween = (from, to) => ({
-  from: from.date,
-  to: to.date,
-  portfolio: (to.portfolio / from.portfolio - 1) * 100,
-  benchmark: (to.benchmark / from.benchmark - 1) * 100,
-  netCashInAtEnd: to.netCashIn,
-});
 
 const benchmark = async (req, res) => {
   const portfolioId = req.params.id;
@@ -325,11 +283,14 @@ const benchmark = async (req, res) => {
     where: { id: portfolioId, userId: req.user.id },
     select: { id: true },
   });
-  if (!portfolio) return res.status(404).json({ error: "Portfolio not found." });
+  if (!portfolio)
+    return res.status(404).json({ error: "Portfolio not found." });
 
   const { trades, positions, prices } = await loadBenchmarkData(portfolioId);
-  if (!trades.length) return res.status(400).json({ error: "No trades to benchmark." });
-  if (!prices.KSE100) return res.status(400).json({ error: "KSE100 prices not synced yet." });
+  if (!trades.length)
+    return res.status(400).json({ error: "No trades to benchmark." });
+  if (!prices.KSE100)
+    return res.status(400).json({ error: "KSE100 prices not synced yet." });
 
   const splits = detectAdjustedSplits(trades, prices);
   const walk = walkPortfolio(trades, prices, splits);
@@ -371,8 +332,10 @@ const benchmark = async (req, res) => {
       maxDrawdown: walk.maxDrawdown,
     },
     moneyWeighted: {
-      portfolioXirr: xirr([...cashFlows, { date: asOf, amount: walk.portfolioValue }]) * 100,
-      benchmarkXirr: xirr([...cashFlows, { date: asOf, amount: walk.shadowValue }]) * 100,
+      portfolioXirr:
+        xirr([...cashFlows, { date: asOf, amount: walk.portfolioValue }]) * 100,
+      benchmarkXirr:
+        xirr([...cashFlows, { date: asOf, amount: walk.shadowValue }]) * 100,
     },
     phases,
     series: series.map((point) => ({
@@ -392,8 +355,98 @@ const benchmark = async (req, res) => {
       dividendsIncluded: false,
     },
   };
-
   res.status(200).json({ message: "success", data: round2(data) });
 };
 
-export { portfolioList, positionsList, tradeList, benchmark };
+// GET /portfolio/:id/income — dividends you were entitled to, per stock and in total
+const incomeFromDividends = async (req, res) => {
+  const portfolio = await prisma.portfolio.findFirst({
+    where: { id: req.params.id, userId: req.user.id },
+    select: { id: true },
+  });
+  if (!portfolio) {
+    return res.status(404).json({ error: "Portfolio not found." });
+  }
+
+  const trades = await prisma.trade.findMany({
+    where: { portfolioId: portfolio.id },
+    orderBy: { executedAt: "asc" },
+  });
+  const shareChanges = await prisma.corporateAction.findMany({
+    where: { type: { in: ["BONUS_SHARE", "SPLIT"] } },
+    orderBy: { exDate: "asc" },
+  });
+  const today = new Date(`${new Date().toISOString().slice(0, 10)}T00:00:00Z`);
+  const dividends = await prisma.corporateAction.findMany({
+    where: { type: "DIVIDEND", exDate: { lte: today } },
+    orderBy: { exDate: "asc" },
+  });
+  const securities = await prisma.security.findMany({
+    select: { id: true, symbol: true },
+  });
+  const symbolOf = {};
+  for (const security of securities) {
+    symbolOf[security.id] = security.symbol;
+  }
+
+  const received = dividendsReceived(trades, shareChanges, dividends, symbolOf);
+
+  //add up per stock and in total
+  const byStock = [];
+  let total = 0;
+  for (const dividend of received) {
+    let stock;
+    for (const row of byStock) {
+      if (row.symbol === dividend.symbol) {
+        stock = row;
+      }
+    }
+    if (!stock) {
+      stock = { symbol: dividend.symbol, dividends: 0, rupees: 0 };
+      byStock.push(stock);
+    }
+    stock.dividends = stock.dividends + 1;
+    stock.rupees = stock.rupees + dividend.rupees;
+    total = total + dividend.rupees;
+  }
+  //dividends announced but not paid yet, what you would get if you keep what you hold
+  const announced = await prisma.corporateAction.findMany({
+    where: { type: "DIVIDEND", exDate: { gt: today } },
+    orderBy: { exDate: "asc" },
+  });
+  const upcomingDividend = [];
+  for (const dividend of announced) {
+    const shares = sharesHeldOn(trades, shareChanges, dividend.securityId, dividend.exDate);
+    if (shares === 0) {
+      continue;
+    }
+    const perShare = Number(dividend.amount);
+    //last weekday before the ex date, you must own the shares by then
+    const ownBy = new Date(dividend.exDate);
+    ownBy.setUTCDate(ownBy.getUTCDate() - 1);
+    while (ownBy.getUTCDay() === 0 || ownBy.getUTCDay() === 6) {
+      ownBy.setUTCDate(ownBy.getUTCDate() - 1);
+    }
+    upcomingDividend.push({
+      symbol: symbolOf[dividend.securityId],
+      exDate: dividend.exDate,
+      ownBy,
+      perShare,
+      shares,
+      expected: shares * perShare,
+    });
+  }
+
+  res.status(200).json({
+    message: "success",
+    data: { total, byStock, dividends: received ,upcomingDividend},
+  });
+};
+
+export {
+  portfolioList,
+  positionsList,
+  tradeList,
+  benchmark,
+  incomeFromDividends,
+};
