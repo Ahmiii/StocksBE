@@ -484,8 +484,9 @@ Every protected endpoint filters by `req.user.id`. A user can only see or change
 | 17 | DELETE | `/watchlist/:securityId` | 🔒 | Remove a security from my watchlist |
 | 18 | GET | `/portfolio/:id/benchmark` | 🔒 | Portfolio vs `KSE100`: same-cash shadow, time-weighted chart, XIRR, per-stock alpha |
 | 19 | POST | `/broker/accounts/:id/full-sync` | 🔒 | The nightly routine on demand: log in with the stored password, then trades + prices + payouts |
-| 20 | GET | `/market/payouts/:symbol` | 🔒 | Fetch one stock's dividends, bonus and right shares from the analytics API and save them to `corporate_actions` |
-| 21 | POST | `/market/getbulkpayouts/sync/:id` | 🔒 | The same for every held + watched stock, one at a time with a pause; the nightly job runs this |
+| 20 | POST | `/market/payout/:symbol` | 🔒 | Fetch one stock's dividends, bonus and right shares from the analytics API and save them to `corporate_actions` |
+| 21 | POST | `/market/bulk-payouts/sync/:id` | 🔒 | The same for every held + watched stock, one at a time with a pause; the nightly job runs this |
+| 23 | GET | `/market/payout/:symbol` | 🔒 | Everything on record for one stock: dividends, bonus, rights, splits, mergers. Reads the table only; feeds the stock screen |
 | 22 | GET | `/portfolio/:id/dividend-income` | 🔒 | Dividends you were entitled to since your first buy, per stock and in total, plus the announced ones ahead |
 
 ---
@@ -1237,9 +1238,9 @@ Chart `stock` and `benchmark`; show `close` in the tooltip (the real price); put
 
 ---
 
-#### 20. `GET /market/payouts/:symbol` 🔒
+#### 20. `POST /market/payout/:symbol` 🔒
 
-Fetches one stock's payout announcements from the analytics API (`/payouts/announcement-break-down/SYMBOL`), keeps the published ones that have an ex-date, and upserts them into `corporate_actions` with `source = "payouts"`. One provider row can become up to three of ours: a `DIVIDEND` when `dividend > 0`, a `BONUS_SHARE` when `bonus > 0` (`ratio = 1 + bonus / 100`) and a `RIGHT_SHARE` when `rightIssue > 0` (`ratio = rightIssue / 100`, `amount = rightPrice`). A GET that writes, kept for looking at one stock; the nightly job uses endpoint 21.
+Fetches one stock's payout announcements from the analytics API (`/payouts/announcement-break-down/SYMBOL`), keeps the published ones that have an ex-date, and upserts them into `corporate_actions` with `source = "payouts"`. One provider row can become up to three of ours: a `DIVIDEND` when `dividend > 0`, a `BONUS_SHARE` when `bonus > 0` (`ratio = 1 + bonus / 100`) and a `RIGHT_SHARE` when `rightIssue > 0` (`ratio = rightIssue / 100`, `amount = rightPrice`). A POST because it writes; to only read what is on record use endpoint 23. The nightly job uses endpoint 21.
 
 Needs a live market session, because this feed wants the page token as well as the cookie (section 10.7). Link the account or run `full-sync` first.
 
@@ -1274,7 +1275,7 @@ Needs a live market session, because this feed wants the page token as well as t
 
 ---
 
-#### 21. `POST /market/getbulkpayouts/sync/:id` 🔒
+#### 21. `POST /market/bulk-payouts/sync/:id` 🔒
 
 Endpoint 20 for every stock you hold or watch (`KSE100` excluded), one after another with a one-to-three-second pause between calls (section 10.8). A stock that fails is noted and skipped; a 429 or 5xx from the provider stops the run for the day. This is what the nightly job calls (section 10.6), so it is only needed by hand after adding to the watchlist or to refresh before the evening.
 
@@ -1298,6 +1299,44 @@ Endpoint 20 for every stock you hold or watch (`KSE100` excluded), one after ano
 ```
 
 A row with `error` instead of `saved` is a stock whose call failed. ETFs come back with `saved: 0`; they do not pay through this feed. Takes about a minute for 24 stocks because of the pauses.
+
+**Errors**
+
+| Status | Body | When |
+|---|---|---|
+| 404 | `{ "error": "account does not exists" }` | Unknown id or not your account. |
+| 401 | `{ "error": "Broker session expired. …" }` | No live session; link or full-sync first. |
+
+---
+
+#### 23. `GET /market/payout/:symbol` 🔒
+
+Everything `corporate_actions` holds for one stock, newest first, read from the table only: no provider call, no session needed, a few milliseconds. This is what the stock screen's "Dividends & actions" block reads: next announced dividend, rupees per share paid in the last twelve months, the last split or bonus, and how many dividends are on record. It also returns the hand-entered split and merger rows the payouts feed never had.
+
+**Path params:** `symbol` — case-insensitive.
+
+**Success — `200 OK`** (abbreviated)
+
+```json
+{
+  "message": "success",
+  "data": {
+    "actions": [
+      { "type": "DIVIDEND", "exDate": "2026-09-18", "ratio": null, "amount": 5.25, "toSymbol": null, "source": "payouts" },
+      { "type": "SPLIT", "exDate": "2025-07-21", "ratio": 5, "amount": null, "toSymbol": null, "source": "manual" },
+      { "type": "DIVIDEND", "exDate": "2024-09-19", "ratio": null, "amount": 33, "toSymbol": null, "source": "payouts" }
+    ]
+  }
+}
+```
+
+`exDate` is a plain `YYYY-MM-DD` so the app can compare it with today's date as text. `toSymbol` is set only on a `MERGER` row, the stock the shares became. Per-share amounts are as announced: the Rs 33 above is per old LCI share, before the five-for-one split (limitation 25).
+
+**Errors**
+
+| Status | Body | When |
+|---|---|---|
+| 404 | `{ "error": "security does not exist" }` | Unknown symbol. |
 
 **Errors**
 
@@ -1508,7 +1547,7 @@ If the market API answers `401` mid-run, the cached cookie is thrown away so the
 1. `brokerLogin` with the decrypted password (`src/utils/secrets.js`, AES-256-GCM, key from `CREDENTIALS_KEY`);
 2. `syncAccount` — the same code as `POST /broker/accounts/:id/sync`: trades, holdings, positions, today's close from `mtmPrice`;
 3. `syncPricesForAccount` — the same code as `POST /market/sync/:id`: missing daily bars for held + watched symbols and `KSE100`;
-4. `getAllSecuritiesPayoutPerAccount` — the same code as `POST /market/getbulkpayouts/sync/:id`: dividends, bonuses and rights for held + watched symbols into `corporate_actions`, which is how announced ex-dates ahead reach the app.
+4. `getAllSecuritiesPayoutPerAccount` — the same code as `POST /market/bulk-payouts/sync/:id`: dividends, bonuses and rights for held + watched symbols into `corporate_actions`, which is how announced ex-dates ahead reach the app.
 
 `syncStatus` on the account is `syncing` while it runs, `idle` on success (with `lastSyncedAt`), `error` on failure; failures are logged to the console and the next account still runs. The app's Portfolio header shows this as "Synced 8 Sep, 17:32" / "Last sync failed". `POST /broker/accounts/:id/full-sync` runs the same routine on demand.
 
@@ -1657,7 +1696,7 @@ These are facts about the code as it is today. They are listed so nobody is surp
 6. ~~No global Express error handler → unexpected errors return HTML, not JSON.~~ Fixed: unknown routes return `404 { "error" }` and thrown errors `500 { "error": "Something went wrong." }`, logged to the console.
 7. ~~`PATCH …/disconnect` does not clear the in-memory broker session, so `sync` keeps working for up to 15 minutes after "disconnect".~~ Fixed: `disconnectAccount` calls `clearSession`.
 8. Broker sessions live only in memory (see section 12): lost on restart, not shared across instances.
-9. `POST /market/sync/:id` and `POST /market/getbulkpayouts/sync/:id` process symbols one at a time inside a single HTTP request, with a random one-to-three-second pause between them (section 10.8), so each takes about a minute for 24 symbols. The nightly job (section 10.6) does the same work unattended, so these requests are only for a manual refresh; a long watchlist would still make them slow.
+9. `POST /market/sync/:id` and `POST /market/bulk-payouts/sync/:id` process symbols one at a time inside a single HTTP request, with a random one-to-three-second pause between them (section 10.8), so each takes about a minute for 24 symbols. The nightly job (section 10.6) does the same work unattended, so these requests are only for a manual refresh; a long watchlist would still make them slow.
 
 **Data quality**
 

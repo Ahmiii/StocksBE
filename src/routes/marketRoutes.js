@@ -7,8 +7,9 @@ import {
   getTrend,
 } from "../controllers/marketDataController.js";
 import {
-  getSingleSecuritiesPayout,
-  getBulkSecuritiesPayout,
+  saveBulkSecuritiesPayout,
+  getSecurityPayoutOfCompany,
+  saveSingleSecuritiesPayout,
 } from "../controllers/corporateActionController.js";
 import { authMiddleware } from "../middlewares/authMiddleware.js";
 
@@ -20,6 +21,7 @@ router.post("/securities/:id", syncSecurities);
 router.post("/sync/:id", syncPrices);
 router.get("/prices/:symbol", getPrices);
 router.get("/trend/:symbol", getTrend);
-router.get("/payouts/:symbol", getSingleSecuritiesPayout);
-router.post("/getbulkpayouts/sync/:id", getBulkSecuritiesPayout);
+router.post("/payout/:symbol", saveSingleSecuritiesPayout);
+router.get("/payout/:symbol", getSecurityPayoutOfCompany);
+router.post("/bulk-payouts/sync/:id", saveBulkSecuritiesPayout);
 export default router;

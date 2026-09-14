@@ -1,6 +1,7 @@
 import { prisma } from "../config/db.js";
 import { fetchDashboardApi } from "../services/dashboardApi.js";
 import { pauseBetweenCalls, providerSaysStop } from "../utils/pace.js";
+import { formatDate } from "../utils/dateRange.js";
 
 // Turns the provider's rows into actions. Takes the rows, returns the list.
 
@@ -49,8 +50,6 @@ const payoutFilterData = (securityPayout) => {
   return cleanPayoutData;
 };
 
-// Saves the actions of one stock. Takes the stock's id and the list, returns
-// how many it saved. One upsert each: a re-sync updates, never duplicates.
 const savePayoutInDB = async (securityId, cleanPayoutData) => {
   for (const payout of cleanPayoutData) {
     const exDate = new Date(`${payout.exDate}T00:00:00Z`); // "2026-08-12" -> a date
@@ -126,7 +125,7 @@ const getAllSecuritiesPayoutPerAccount = async (account) => {
   };
 };
 
-const getSingleSecuritiesPayout = async (req, res) => {
+const saveSingleSecuritiesPayout = async (req, res) => {
   const symbol = req.params.symbol.toUpperCase();
   const security = await prisma.security.findUnique({ where: { symbol } });
   if (!security)
@@ -159,7 +158,7 @@ const getSingleSecuritiesPayout = async (req, res) => {
   });
 };
 
-const getBulkSecuritiesPayout = async (req, res) => {
+const saveBulkSecuritiesPayout = async (req, res) => {
   const account = await prisma.brokerAccount.findFirst({
     where: { id: req.params.id, userId: req.user.id },
     select: {
@@ -179,8 +178,34 @@ const getBulkSecuritiesPayout = async (req, res) => {
   res.status(200).json({ message: "success", data });
 };
 
+const getSecurityPayoutOfCompany = async (req, res) => {
+  const symbol = req.params.symbol.toUpperCase();
+  const security = await prisma.security.findUnique({ where: { symbol } });
+  if (!security) {
+    return res.status(404).json({ error: "security does not exist" });
+  }
+  const rows = await prisma.corporateAction.findMany({
+    where: { securityId: security.id },
+    orderBy: { exDate: "desc" },
+    include: { toSecurity: { select: { symbol: true } } },
+  });
+  const actions = [];
+  for (const row of rows) {
+    actions.push({
+      type: row.type,
+      exDate: formatDate(row.exDate),
+      ratio: row.ratio === null ? null : Number(row.ratio),
+      amount: row.amount === null ? null : Number(row.amount),
+      toSymbol: row.toSecurity ? row.toSecurity.symbol : null,
+      source: row.source,
+    });
+  }
+  res.status(200).json({ message: "success", data: { actions } });
+};
+
 export {
-  getSingleSecuritiesPayout,
-  getBulkSecuritiesPayout,
+  saveSingleSecuritiesPayout,
+  saveBulkSecuritiesPayout,
   getAllSecuritiesPayoutPerAccount,
+  getSecurityPayoutOfCompany
 };

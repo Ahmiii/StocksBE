@@ -1582,18 +1582,18 @@
           ]
         },
         {
-          "name": "Payouts for one stock",
+          "name": "Sync payouts for one stock",
           "request": {
-            "method": "GET",
+            "method": "POST",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/market/payouts/SYS",
+              "raw": "{{baseUrl}}/market/payout/SYS",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "market",
-                "payouts",
+                "payout",
                 "SYS"
               ]
             },
@@ -1615,16 +1615,16 @@
             {
               "name": "200 OK",
               "originalRequest": {
-                "method": "GET",
+                "method": "POST",
                 "header": [],
                 "url": {
-                  "raw": "{{baseUrl}}/market/payouts/SYS",
+                  "raw": "{{baseUrl}}/market/payout/SYS",
                   "host": [
                     "{{baseUrl}}"
                   ],
                   "path": [
                     "market",
-                    "payouts",
+                    "payout",
                     "SYS"
                   ]
                 }
@@ -1648,13 +1648,13 @@
             "method": "POST",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/market/getbulkpayouts/sync/{{brokerAccountId}}",
+              "raw": "{{baseUrl}}/market/bulk-payouts/sync/{{brokerAccountId}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "market",
-                "getbulkpayouts",
+                "bulk-payouts",
                 "sync",
                 "{{brokerAccountId}}"
               ]
@@ -1681,13 +1681,13 @@
                 "method": "POST",
                 "header": [],
                 "url": {
-                  "raw": "{{baseUrl}}/market/getbulkpayouts/sync/{{brokerAccountId}}",
+                  "raw": "{{baseUrl}}/market/bulk-payouts/sync/{{brokerAccountId}}",
                   "host": [
                     "{{baseUrl}}"
                   ],
                   "path": [
                     "market",
-                    "getbulkpayouts",
+                    "bulk-payouts",
                     "sync",
                     "{{brokerAccountId}}"
                   ]
@@ -1703,6 +1703,67 @@
                 }
               ],
               "body": "{\n  \"message\": \"success\",\n  \"data\": {\n    \"securities\": 24,\n    \"saved\": 285,\n    \"results\": [\n      {\n        \"symbol\": \"AIRLINK\",\n        \"saved\": 9\n      },\n      {\n        \"symbol\": \"BCL\",\n        \"saved\": 0\n      }\n    ]\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Corporate actions on record for one stock",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/market/payout/LCI",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "market",
+                "payout",
+                "LCI"
+              ]
+            },
+            "description": "Everything corporate_actions holds for one stock, newest first: dividends, bonus, rights, splits, mergers. Reads the table only, no provider call. Feeds the stock screen's Dividends & actions block. exDate is YYYY-MM-DD; toSymbol only on a MERGER row."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('actions is a list', () => pm.expect(pm.response.json().data.actions).to.be.an('array'));"
+                ]
+              }
+            }
+          ],
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/market/payout/LCI",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "market",
+                    "payout",
+                    "LCI"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "body": "{\n  \"message\": \"success\",\n  \"data\": {\n    \"actions\": [\n      {\n        \"type\": \"DIVIDEND\",\n        \"exDate\": \"2026-09-18\",\n        \"ratio\": null,\n        \"amount\": 5.25,\n        \"toSymbol\": null,\n        \"source\": \"payouts\"\n      },\n      {\n        \"type\": \"SPLIT\",\n        \"exDate\": \"2025-07-21\",\n        \"ratio\": 5,\n        \"amount\": null,\n        \"toSymbol\": null,\n        \"source\": \"manual\"\n      }\n    ]\n  }\n}"
             }
           ]
         }
