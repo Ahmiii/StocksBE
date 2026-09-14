@@ -1,6 +1,8 @@
 import { prisma } from "../config/db.js";
 import { fetchDashboardApi } from "../services/dashboardApi.js";
 import { pauseBetweenCalls, providerSaysStop } from "../utils/pace.js";
+import { formatDate } from "../utils/dateRange.js";
+import { buildFundamentalsCard } from "../utils/fundamentals.js";
 //one stock's fundamentals from the provider: 41 ratios for the trailing twelve months
 //and seven years, with sector min, median and max
 const fundamentalsDashboardApi = async (symbol, account) => {
@@ -127,8 +129,31 @@ const saveBulkSecuritiesFundamentals = async (req, res) => {
   res.status(200).json({ message: "success", data });
 };
 
+//GET /market/fundamentals/:symbol — the card: fifteen ratios beside the sector, dividend cover,
+//price at the sector P/E and seven years of history. reads our table only
+const getSecurityFundamentals = async (req, res) => {
+  const symbol = req.params.symbol.toUpperCase();
+  const security = await prisma.security.findUnique({ where: { symbol } });
+  if (!security) {
+    return res.status(404).json({ error: "security does not exist" });
+  }
+  const row = await prisma.fundamental.findUnique({ where: { securityId: security.id } });
+  if (!row || !row.payload.fields) {
+    return res.status(404).json({ error: "no fundamentals for this stock" });
+  }
+  const splits = await prisma.corporateAction.findMany({
+    where: { securityId: security.id, type: "SPLIT", ratio: { not: null } },
+    orderBy: { exDate: "asc" },
+  });
+  const card = buildFundamentalsCard(row.payload, splits);
+  card.symbol = symbol;
+  card.asOf.fetchedAt = formatDate(row.fetchedAt);
+  res.status(200).json({ message: "success", data: card });
+};
+
 export {
   saveSingleSecurityFundamentals,
   saveAllSecuritiesFundamentalsPerAccount,
   saveBulkSecuritiesFundamentals,
+  getSecurityFundamentals,
 };
