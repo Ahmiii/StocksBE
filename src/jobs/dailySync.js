@@ -16,7 +16,8 @@ import {
 } from "../controllers/brokerAccountController.js";
 import { syncPricesForAccount } from "../controllers/marketDataController.js";
 import { saveSession } from "../services/brokderSessionStore.js";
-import { getAllSecuritiesPayoutPerAccount } from "../controllers/corporateActionController.js";
+import { saveAllSecuritiesPayoutPerAccount } from "../controllers/corporateActionController.js";
+import { saveAllSecuritiesFundamentalsPerAccount } from "../controllers/fundamentalsController.js";
 
 // The nightly routine for one account: log in with the stored password, pull
 // trades and holdings, then fetch the missing price bars.
@@ -41,13 +42,14 @@ const syncOneAccount = async (account) => {
   if (!trades.ok) throw new Error(trades.error);
 
   const prices = await syncPricesForAccount(account);
-  const payouts = await getAllSecuritiesPayoutPerAccount(account);
-
+  const payouts = await saveAllSecuritiesPayoutPerAccount(account);
+  const fundamentals = await saveAllSecuritiesFundamentalsPerAccount(account);
   return {
     trades: trades.data.trades,
     positions: trades.data.positions,
     newPriceRows: prices.newRows,
     corporateActions: payouts.saved,
+    fundamentals:fundamentals.saved
   };
 };
 

@@ -74,7 +74,7 @@ const savePayoutInDB = async (securityId, cleanPayoutData) => {
   return cleanPayoutData.length;
 };
 
-const getAllSecuritiesPayoutPerAccount = async (account) => {
+const saveAllSecuritiesPayoutPerAccount = async (account) => {
   const securitiesInPortfolioOrWatchlist = await prisma.security.findMany({
     where: {
       OR: [
@@ -171,7 +171,7 @@ const saveBulkSecuritiesPayout = async (req, res) => {
   }
   let data;
   try {
-    data = await getAllSecuritiesPayoutPerAccount(account);
+    data = await saveAllSecuritiesPayoutPerAccount(account);
   } catch (error) {
     return res.status(401).json({ error: error.message });
   }
@@ -206,6 +206,6 @@ const getSecurityPayoutOfCompany = async (req, res) => {
 export {
   saveSingleSecuritiesPayout,
   saveBulkSecuritiesPayout,
-  getAllSecuritiesPayoutPerAccount,
+  saveAllSecuritiesPayoutPerAccount,
   getSecurityPayoutOfCompany
 };
