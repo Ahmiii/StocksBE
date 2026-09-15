@@ -68,7 +68,7 @@ model Security {
   positions        Position[]
   dailyPrices      DailyPrice[]
   watchlistItems   WatchlistItem[]
-  fundamental      Fundamental?
+  fundamentals     Fundamental[]
   // Two links to corporate actions: the ones that happened to this stock, and
   // the mergers that turned another stock into this one.
   corporateActions CorporateAction[] @relation("actionsOf")
@@ -181,14 +181,19 @@ model CorporateAction {
   @@map("corporate_actions")
 }
 
+// One provider statement for one stock, kept whole and replaced on every fetch.
+// statement is "fundamentals" (41 ratios with sector stats), "income",
+// "cashflow" or "balance" (the statements themselves, in thousands of rupees).
 model Fundamental {
   id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  securityId String    @unique @map("security_id") @db.Uuid
+  securityId String    @map("security_id") @db.Uuid
+  statement  String    @default("fundamentals") @db.VarChar(16)
   interval   String    @db.VarChar(16)
   payload    Json
   providerAt DateTime? @map("provider_at") @db.Timestamptz
   fetchedAt  DateTime  @default(now()) @map("fetched_at") @db.Timestamptz
   security   Security  @relation(fields: [securityId], references: [id])
 
+  @@unique([securityId, statement])
   @@map("fundamentals")
 }

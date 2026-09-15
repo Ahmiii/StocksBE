@@ -1,7 +1,11 @@
 import { prisma } from "../config/db.js";
-import { getMarketSession } from "../services/brokderSessionStore.js";
-import { fetchMarket } from "../services/dashboardApi.js";
+import { getSession, saveSession } from "../services/brokderSessionStore.js";
+import { fetchMarket, getMarketCookie } from "../services/dashboardApi.js";
+import { decrypt } from "../utils/secrets.js";
+import { pauseBetweenCalls } from "../utils/pace.js";
+import { brokerLogin } from "./brokerAccountController.js";
 import { savePrices } from "./marketDataController.js";
+import { savePayoutsForSecurity } from "./corporateActionController.js";
 
 const BENCHMARK_SYMBOL = "KSE100";
 
@@ -71,28 +75,59 @@ const addToWatchlist = async (req, res) => {
     update: {},
   });
 
-  // Pull the price history now if we can, so the stock does not show "—" until
-  // the next sync. Needs a live market session; if there is none, the next
-  // POST /market/sync/:id picks it up because watched symbols are in scope.
-  let pricesLoaded = (await prisma.dailyPrice.count({ where: { securityId: security.id } })) > 0;
-
-  if (!pricesLoaded) {
-    const accounts = await prisma.brokerAccount.findMany({
-      where: { userId: req.user.id },
-      select: { id: true },
-    });
-    const market = accounts.map((a) => getMarketSession(a.id)).find(Boolean);
-
-    if (market) {
-      const bars = await fetchMarket(`/daily/${security.symbol}`, market.cookieHeader);
-      pricesLoaded = (await savePrices(security.id, bars)) > 0;
+  //pull everything the stock's screen needs right now, so it does not sit empty until the
+  //nightly job: prices and payouts. logs in with the stored password when no session is
+  //alive. a provider failure is reported, never fails the add
+  const loaded = { prices: 0, payouts: 0, note: null };
+  try {
+    const account = await readyAccount(req.user.id);
+    if (!account) {
+      loaded.note = "no broker account with a stored password, the nightly sync will fill this stock";
+    } else {
+      const havePrices = await prisma.dailyPrice.count({ where: { securityId: security.id } });
+      if (havePrices === 0) {
+        const cookie = await getMarketCookie({ brokerAccountId: account.id, clientCode: account.clientCode });
+        const bars = await fetchMarket(`/daily/${security.symbol}`, cookie);
+        loaded.prices = await savePrices(security.id, bars);
+        await pauseBetweenCalls();
+      }
+      const havePayouts = await prisma.corporateAction.count({ where: { securityId: security.id } });
+      if (havePayouts === 0) {
+        loaded.payouts = await savePayoutsForSecurity(security, account);
+      }
     }
+  } catch (error) {
+    loaded.note = `could not load history now: ${error.message}. The nightly sync will fill it.`;
   }
 
   res.status(200).json({
     message: "success",
-    data: { symbol: security.symbol, pricesLoaded },
+    data: {
+      symbol: security.symbol,
+      pricesLoaded: (await prisma.dailyPrice.count({ where: { securityId: security.id } })) > 0,
+      ...loaded,
+    },
   });
+};
+
+//the user's broker account with a live session, logging in with the stored password when the
+//session has expired. null when there is no account or no stored password
+const readyAccount = async (userId) => {
+  const account = await prisma.brokerAccount.findFirst({
+    where: { userId, credentialsEnc: { not: null } },
+    select: { id: true, clientCode: true, credentialsEnc: true },
+  });
+  if (!account) {
+    return null;
+  }
+  if (!getSession(account.id)) {
+    const login = await brokerLogin({ accountNumber: account.clientCode, password: decrypt(account.credentialsEnc) });
+    if (!login.ok) {
+      throw new Error(login.error);
+    }
+    saveSession(account.id, { sessionCookie: login.sessionCookie, cookieJar: login.cookieJar });
+  }
+  return { id: account.id, clientCode: account.clientCode };
 };
 
 const removeFromWatchlist = async (req, res) => {

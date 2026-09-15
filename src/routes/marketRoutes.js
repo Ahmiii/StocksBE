@@ -11,11 +11,6 @@ import {
   getSecurityPayoutOfCompany,
   saveSingleSecuritiesPayout,
 } from "../controllers/corporateActionController.js";
-import {
-  saveSingleSecurityFundamentals,
-  saveBulkSecuritiesFundamentals,
-  getSecurityFundamentals,
-} from "../controllers/fundamentalsController.js";
 
 import { authMiddleware } from "../middlewares/authMiddleware.js";
 const router = express.Router();
@@ -29,8 +24,5 @@ router.get("/trend/:symbol", getTrend);
 router.post("/payout/:symbol", saveSingleSecuritiesPayout);
 router.get("/payout/:symbol", getSecurityPayoutOfCompany);
 router.post("/bulk-payouts/sync/:id", saveBulkSecuritiesPayout);
-router.post("/fundamentals/:symbol", saveSingleSecurityFundamentals);
-router.post("/bulk-fundamentals/sync/:id", saveBulkSecuritiesFundamentals);
-router.get("/fundamentals/:symbol", getSecurityFundamentals);
 
 export default router;

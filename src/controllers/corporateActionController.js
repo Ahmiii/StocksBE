@@ -203,9 +203,17 @@ const getSecurityPayoutOfCompany = async (req, res) => {
   res.status(200).json({ message: "success", data: { actions } });
 };
 
+//fetch and save one stock's payouts. takes the security and the account, returns how many rows
+const savePayoutsForSecurity = async (security, account) => {
+  const payoutResponse = await payoutDashboardApi(security.symbol, account);
+  const cleanPayoutData = payoutFilterData(payoutResponse);
+  return savePayoutInDB(security.id, cleanPayoutData);
+};
+
 export {
   saveSingleSecuritiesPayout,
   saveBulkSecuritiesPayout,
   saveAllSecuritiesPayoutPerAccount,
-  getSecurityPayoutOfCompany
+  getSecurityPayoutOfCompany,
+  savePayoutsForSecurity,
 };
