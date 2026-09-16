@@ -12,6 +12,7 @@ import {
   returnBetween,
 } from "../utils/portfolioFuntionHandler.js";
 import { dividendsReceived,sharesHeldOn } from "../utils/dividendIncome.js";
+
 const portfolioList = async (req, res) => {
   const portfoliolist = await prisma.portfolio.findMany({
     where: {
@@ -51,6 +52,7 @@ const positionsList = async (req, res) => {
         select: {
           symbol: true,
           companyName: true,
+          sector:true,
           dailyPrices: {
             orderBy: { tradeDate: "desc" },
             take: 2,
@@ -132,6 +134,7 @@ const positionsList = async (req, res) => {
       portfolioId: row.portfolioId,
       symbol: row.security.symbol,
       companyName: row.security.companyName,
+      sector:row.security.sector,
       quantity,
       avgCost,
       lastPrice,
@@ -162,6 +165,14 @@ const positionsList = async (req, res) => {
   const invested = priced.reduce((sum, p) => sum + p.investedValue, 0);
   const marketValue = priced.reduce((sum, p) => sum + p.marketValue, 0);
 
+    //each holding's share of the whole book at today's prices
+  for (const position of positions) {
+    if (position.marketValue === null || marketValue === 0) {
+      position.weightPct = null;
+    } else {
+      position.weightPct = (position.marketValue / marketValue) * 100;
+    }
+  }
   // Today's move: the rupee changes added up, as a percent of what those
   // holdings were worth the day before.
   const positionsWithDayChange = open.filter((p) => p.dayChange !== null);

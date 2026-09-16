@@ -87,9 +87,17 @@
 
 ## Phase 3 — Product features
 
-### 3.1 Alerts and push — M
-- **Backend:** `alerts` table (symbol, rule: price above / below, % day move, 52-week high, dividend announced). Evaluated at the end of each cron run. `expo-notifications` push tokens stored per user.
-- **App:** "Set alert" on the stock screen; notification opens that stock.
+### 3.1 Price alerts and push — M (parked 2026-09-16, spec agreed)
+- **Why:** Settings already shows a "Price alerts · soon" row. A retail investor watches a level ("tell me when PSO closes below Rs 300") and should not have to open the app every evening to check it.
+- **What the user gets:** "Set alert" on the stock screen (above / below, a price); a push message after the nightly sync when the day's close crosses it ("PSO closed at Rs 296, below your Rs 300 alert"), tapping it opens the stock; the list under Settings with "fired on 12 Sep" and swipe to delete.
+- **Not live:** closes arrive once a day, so an alert fires in the evening, never mid-session. Only above / below at first; a % day move, 52-week high or dividend announced is one more value in `rule` later.
+- **Backend, in order:**
+  1. `price_alerts` table: `userId`, `securityId`, `rule` ("above" | "below", VarChar 8), `price` Decimal(12,2), `firedAt` nullable, `createdAt`. Index on `userId`, no unique key (two levels on one stock is normal). Back-links `priceAlerts PriceAlert[]` on `User` and `Security`.
+  2. Three routes mirroring the watchlist controller: `POST /alerts/:securityId` (rule, price), `GET /alerts`, `DELETE /alerts/:id`.
+  3. A check at the end of `syncOneAccount`: for every alert with `firedAt` null, compare the stock's latest close with `price`; on a cross, stamp `firedAt` and log it. Testable in Postman before any push exists.
+  4. `expo-notifications`: the app registers its push token, stored per user; the check sends one message per fired alert.
+- **App:** the button on the stock screen, the list in Settings replacing the "soon" badge, the notification tap route to `/stock/[symbol]`.
+- **Done when:** an alert set on a stock that closes past its level tonight produces one push and shows "fired on" in the list tomorrow, and never fires again unless re-created.
 
 ### 3.2 News and announcements — S
 - Provider `news/SYMBOL`. Show the last five on the stock screen and a feed for held stocks on the Market tab, replacing the removed sectors block.

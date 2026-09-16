@@ -216,10 +216,11 @@ const syncSecurities = async (req, res) => {
   }
 
   for (const row of bySymbol.values()) {
-    const data = {
-      companyName: row.symbolName,
-      sector: row.sectorName || null,
-    };
+    //a blank sector from the broker must not wipe one set by hand
+    const data = { companyName: row.symbolName };
+    if (row.sectorName) {
+      data.sector = row.sectorName;
+    }
     await prisma.security.upsert({
       where: { symbol: row.symbol },
       create: { symbol: row.symbol, ...data },
