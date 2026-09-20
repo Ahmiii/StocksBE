@@ -104,18 +104,20 @@ const catchUpIfMissed = async () => {
   const { today, hour, isWeekday } = karachiNow();
   if (!isWeekday || hour < SYNC_START_HOUR) return;
 
-  const startOfToday = new Date(`${today}T00:00:00+05:00`);
+  //a sync from earlier in the day does not count, its prices were not the closing ones
+  const startHour = String(SYNC_START_HOUR).padStart(2, "0");
+  const syncStartToday = new Date(`${today}T${startHour}:00:00+05:00`);
   const missed = await prisma.brokerAccount.count({
     where: {
       credentialsEnc: { not: null },
       syncStatus: { not: SYNC_STATUS.DISCONNECTED },
-      OR: [{ lastSyncedAt: null }, { lastSyncedAt: { lt: startOfToday } }],
+      OR: [{ lastSyncedAt: null }, { lastSyncedAt: { lt: syncStartToday } }],
     },
   });
   if (missed === 0) return;
 
   console.log(
-    `[sync] ${missed} account(s) not synced today; catching up in a few minutes`,
+    `[sync] ${missed} account(s) not synced this evening; catching up in a few minutes`,
   );
   await pause(60 * 1000, 5 * 60 * 1000);
   await runDailySync();
@@ -129,7 +131,11 @@ const startDailySync = () => {
     );
     return;
   }
-  cron.schedule(SYNC_SCHEDULE, runAtARandomTime, { timezone: SYNC_TIMEZONE });
+  //a laptop asleep at the start hour wakes up late. still run tonight's sync if the evening window is not over
+  cron.schedule(SYNC_SCHEDULE, runAtARandomTime, {
+    timezone: SYNC_TIMEZONE,
+    missedExecutionTolerance: SYNC_JITTER_MINUTES * 60 * 1000,
+  });
   console.log(
     `[sync] scheduled: weekdays between ${SYNC_START_HOUR}:00 and ${SYNC_START_HOUR + SYNC_JITTER_MINUTES / 60}:00 ${SYNC_TIMEZONE}`,
   );

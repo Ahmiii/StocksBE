@@ -5,6 +5,10 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 const formatDate = (date) => date.toISOString().slice(0, 10);
 
+// When the market has closed on a trading day. Days are stored as midnight UTC,
+// and 16:30 in Karachi is 11:30 UTC. 16:30 covers friday's later close.
+const marketCloseOn = (day) => new Date(day.getTime() + 11.5 * 60 * 60 * 1000);
+
 // "Today" on the PSX calendar, not the server's — UTC lags Karachi by 5 hours.
 const today = () =>
   new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Karachi" });
@@ -41,4 +45,4 @@ const parseDateRange = (query = {}) => {
   return { from, to };
 };
 
-export { parseDateRange, formatDate };
+export { parseDateRange, formatDate, marketCloseOn };

@@ -34,6 +34,7 @@ import {
   normalizeTradeRows,
 } from "../utils/tradeData.js";
 import { canStoreSecrets, encrypt } from "../utils/secrets.js";
+import { marketCloseOn } from "../utils/dateRange.js";
 // Never follow redirects: a 302 would drop the Set-Cookie headers we need off
 // the hop that issued them, and the login POST answers with one on success.
 const NO_REDIRECT = {
@@ -500,9 +501,26 @@ const syncAccount = async ({ account, session, params }) => {
     priceRows = [];
   }
 
+  //a full price row from the provider, saved after the market closed, is the final one. the broker price must not change it
+  const fullRowsToday = await prisma.dailyPrice.findMany({
+    where: {
+      tradeDate,
+      volume: { not: null },
+      fetchedAt: { gte: marketCloseOn(tradeDate) },
+    },
+    select: { securityId: true },
+  });
+  const doneSecurityIds = [];
+  for (const fullRow of fullRowsToday) {
+    doneSecurityIds.push(fullRow.securityId);
+  }
+
   const priceUpsert = priceRows
     .filter(
-      (row) => securityIdBySymbol.get(row?.symbol) && row?.mtmPrice != null,
+      (row) =>
+        securityIdBySymbol.get(row?.symbol) &&
+        row?.mtmPrice != null &&
+        !doneSecurityIds.includes(securityIdBySymbol.get(row.symbol)),
     )
     .map((row) =>
       prisma.dailyPrice.upsert({
@@ -517,7 +535,8 @@ const syncAccount = async ({ account, session, params }) => {
           tradeDate,
           close: row.mtmPrice,
         },
-        update: { close: row.mtmPrice, fetchedAt: new Date() },
+        //the saved time is left alone, so a provider row from before the close still counts as not final
+        update: { close: row.mtmPrice },
       }),
     );
   await prisma.$transaction(priceUpsert);

@@ -8,7 +8,7 @@ import {
   BROKER_HOUSE_NAME,
 } from "../config/constants.js";
 import { buildCookieHeader } from "../utils/extractAHLInfor.js";
-import { parseDateRange, formatDate } from "../utils/dateRange.js";
+import { parseDateRange, formatDate, marketCloseOn } from "../utils/dateRange.js";
 import { pauseBetweenCalls, providerSaysStop } from "../utils/pace.js";
 import { getSession, clearMarketSession } from "../services/brokderSessionStore.js";
 import { getMarketCookie, fetchMarket } from "../services/dashboardApi.js";
@@ -82,14 +82,15 @@ const syncPricesForAccount = async (account) => {
     update: {},
   });
 
-  // Only what is held, plus the benchmark. The securities table carries the
-  // whole exchange (~557 rows) for the watchlist; fetching five years for each
-  // would be hundreds of calls for data nobody looks at.
+  // Only what is held, watched or was ever traded, plus the benchmark. The
+  // securities table carries the whole exchange (~557 rows) for the watchlist;
+  // fetching five years for each would be hundreds of calls for data nobody looks at.
   const securities = await prisma.security.findMany({
     where: {
       OR: [
         { positions: { some: { quantity: { gt: 0 } } } },
         { watchlistItems: { some: {} } },
+        { trades: { some: {} } },
         { symbol: BENCHMARK_SYMBOL },
       ],
     },
@@ -102,6 +103,9 @@ const syncPricesForAccount = async (account) => {
         take: 1,
         select: { tradeDate: true, fetchedAt: true },
       },
+      positions: { where: { quantity: { gt: 0 } }, take: 1, select: { id: true } },
+      watchlistItems: { take: 1, select: { id: true } },
+      trades: { orderBy: { executedAt: "desc" }, take: 1, select: { executedAt: true } },
     },
     orderBy: { symbol: "asc" },
   });
@@ -122,6 +126,24 @@ const syncPricesForAccount = async (account) => {
       lastFullPrice.fetchedAt >= marketClose
     ) {
       results.push({ symbol: security.symbol, skipped: "already current" });
+      continue;
+    }
+
+    //a stock that is sold and not watched only needs prices up to its last trade.
+    //prices that reach that day, saved after the market closed on it, are final
+    const stillFollowed =
+      security.positions.length > 0 ||
+      security.watchlistItems.length > 0 ||
+      security.symbol === BENCHMARK_SYMBOL;
+    const lastTrade = security.trades[0];
+    if (
+      !stillFollowed &&
+      lastFullPrice &&
+      lastTrade &&
+      lastFullPrice.tradeDate >= lastTrade.executedAt &&
+      lastFullPrice.fetchedAt >= marketCloseOn(lastTrade.executedAt)
+    ) {
+      results.push({ symbol: security.symbol, skipped: "sold, prices complete" });
       continue;
     }
 

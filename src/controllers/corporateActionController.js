@@ -84,6 +84,10 @@ const saveAllSecuritiesPayoutPerAccount = async (account) => {
         {
           watchlistItems: { some: {} },
         },
+        //a stock that was sold still paid dividends while it was held
+        {
+          trades: { some: {} },
+        },
       ],
       NOT: {
         symbol: "KSE100",

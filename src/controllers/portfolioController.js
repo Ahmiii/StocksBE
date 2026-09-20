@@ -297,14 +297,14 @@ const benchmark = async (req, res) => {
   if (!portfolio)
     return res.status(404).json({ error: "Portfolio not found." });
 
-  const { trades, positions, prices, shareChanges } =
+  const { trades, positions, prices, shareChanges, mergers } =
     await loadBenchmarkData(portfolioId);
   if (!trades.length)
     return res.status(400).json({ error: "No trades to benchmark." });
   if (!prices.KSE100)
     return res.status(400).json({ error: "KSE100 prices not synced yet." });
 
-  const walk = walkPortfolio(trades, prices, shareChanges);
+  const walk = walkPortfolio(trades, prices, shareChanges, mergers);
 
   //a trade paid far above the stored price, with no split or bonus on record after it, means a row is missing in corporate_actions
   const detected = detectAdjustedSplits(trades, prices);

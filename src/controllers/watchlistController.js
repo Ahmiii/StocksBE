@@ -84,13 +84,11 @@ const addToWatchlist = async (req, res) => {
     if (!account) {
       loaded.note = "no broker account with a stored password, the nightly sync will fill this stock";
     } else {
-      const havePrices = await prisma.dailyPrice.count({ where: { securityId: security.id } });
-      if (havePrices === 0) {
-        const cookie = await getMarketCookie({ brokerAccountId: account.id, clientCode: account.clientCode });
-        const bars = await fetchMarket(`/daily/${security.symbol}`, cookie);
-        loaded.prices = await savePrices(security.id, bars);
-        await pauseBetweenCalls();
-      }
+      //always fetched: a stock that was held before can have old prices, and saving prices again is safe
+      const cookie = await getMarketCookie({ brokerAccountId: account.id, clientCode: account.clientCode });
+      const bars = await fetchMarket(`/daily/${security.symbol}`, cookie);
+      loaded.prices = await savePrices(security.id, bars);
+      await pauseBetweenCalls();
       const havePayouts = await prisma.corporateAction.count({ where: { securityId: security.id } });
       if (havePayouts === 0) {
         loaded.payouts = await savePayoutsForSecurity(security, account);

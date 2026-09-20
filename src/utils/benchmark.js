@@ -82,7 +82,7 @@ const priceLookup = (prices, days) => {
 //   benchmark – KSE100 rebased to the first trade.
 // Every rupee spent also buys KSE100 units that day, which gives the
 // "same money into the index" shadow value.
-export const walkPortfolio = (trades, prices, shareChanges = []) => {
+export const walkPortfolio = (trades, prices, shareChanges = [], mergers = []) => {
   const days = tradingDays(trades, prices);
   const priceOf = priceLookup(prices, days);
   const tradesOn = Object.groupBy(trades, (trade) => trade.date);
@@ -124,6 +124,7 @@ export const walkPortfolio = (trades, prices, shareChanges = []) => {
   let portfolioWorstFall = 0;
   let indexPeak = 0;
   let indexWorstFall = 0;
+  const mergersDone = [];
   const series = [];
 
   for (const day of days) {
@@ -138,6 +139,27 @@ export const walkPortfolio = (trades, prices, shareChanges = []) => {
       const shares = sharesToday(trade);
       const change = trade.side === "BUY" ? shares : -shares;
       holdings[trade.symbol] = (holdings[trade.symbol] ?? 0) + change;
+    }
+
+    // 3. a merger that has happened by today swaps the old stock's shares for
+    //    the new stock's, like ENGRO into ENGROH. Same rule the positions use:
+    //    whole shares only, the fraction is paid in cash.
+    for (const merger of mergers) {
+      if (merger.date > day || mergersDone.includes(merger)) {
+        continue;
+      }
+      mergersDone.push(merger);
+      const oldShares = holdings[merger.fromSymbol] ?? 0;
+      if (oldShares <= 0) {
+        continue;
+      }
+      const newShares = sharesToday({
+        symbol: merger.toSymbol,
+        date: merger.date,
+        quantity: Math.floor(oldShares * merger.ratio),
+      });
+      holdings[merger.toSymbol] = (holdings[merger.toSymbol] ?? 0) + newShares;
+      holdings[merger.fromSymbol] = 0;
     }
 
     const valueToday = valueOn(day);
@@ -222,6 +244,8 @@ export const positionsVsBenchmark = (positions, trades, prices, asOf) => {
     const buys = trades.filter(
       (trade) => trade.symbol === position.symbol && trade.side === "BUY",
     );
+    // A position that came from a merger has no buys of its own.
+    if (buys.length === 0) continue;
     const boughtOn = barOnOrAfter(index, averageBuyDate(buys));
     if (!boughtOn) continue;
 

@@ -50,6 +50,39 @@ const loadBenchmarkData = async (portfolioId) => {
   }));
 
   const symbols = [...new Set(trades.map((trade) => trade.symbol)), "KSE100"];
+
+  //a stock swapped into another one, like ENGRO into ENGROH. the new stock's prices are needed too
+  const mergerRows = await prisma.corporateAction.findMany({
+    where: {
+      type: "MERGER",
+      ratio: { not: null },
+      exDate: { lte: new Date() },
+      security: { symbol: { in: symbols } },
+    },
+    orderBy: { exDate: "asc" },
+    select: {
+      exDate: true,
+      ratio: true,
+      security: { select: { symbol: true } },
+      toSecurity: { select: { symbol: true } },
+    },
+  });
+  const mergers = [];
+  for (const row of mergerRows) {
+    if (!row.toSecurity) {
+      continue;
+    }
+    mergers.push({
+      fromSymbol: row.security.symbol,
+      toSymbol: row.toSecurity.symbol,
+      date: formatDate(row.exDate),
+      ratio: Number(row.ratio),
+    });
+    if (!symbols.includes(row.toSecurity.symbol)) {
+      symbols.push(row.toSecurity.symbol);
+    }
+  }
+
   const bars = await prisma.dailyPrice.findMany({
     where: { security: { symbol: { in: symbols } } },
     orderBy: { tradeDate: "asc" },
@@ -87,7 +120,7 @@ const loadBenchmarkData = async (portfolioId) => {
     });
   }
 
-  return { trades, positions, prices, shareChanges };
+  return { trades, positions, prices, shareChanges, mergers };
 };
 
 // Percent change of both lines between two points of the series.
