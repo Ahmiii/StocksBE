@@ -51,13 +51,13 @@ const loadBenchmarkData = async (portfolioId) => {
 
   const symbols = [...new Set(trades.map((trade) => trade.symbol)), "KSE100"];
 
-  //a stock swapped into another one, like ENGRO into ENGROH. the new stock's prices are needed too
+  //a stock swapped into another one, like ENGRO into ENGROH. the new stock's prices are needed too.
+  //all mergers are read, oldest first, so a chain (A into B, later B into C) is followed
   const mergerRows = await prisma.corporateAction.findMany({
     where: {
       type: "MERGER",
       ratio: { not: null },
       exDate: { lte: new Date() },
-      security: { symbol: { in: symbols } },
     },
     orderBy: { exDate: "asc" },
     select: {
@@ -69,7 +69,8 @@ const loadBenchmarkData = async (portfolioId) => {
   });
   const mergers = [];
   for (const row of mergerRows) {
-    if (!row.toSecurity) {
+    //only a merger of a stock that was traded, or that an earlier merger led to
+    if (!row.toSecurity || !symbols.includes(row.security.symbol)) {
       continue;
     }
     mergers.push({

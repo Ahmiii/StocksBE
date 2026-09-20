@@ -88,18 +88,30 @@ export const walkPortfolio = (trades, prices, shareChanges = [], mergers = []) =
   const tradesOn = Object.groupBy(trades, (trade) => trade.date);
   const indexStart = priceOf(INDEX, days[0]);
 
+  // The newest day each stock has a price for. A stock that was sold stops
+  // getting prices, so its history ends earlier than the others'.
+  const lastPriceDay = {};
+  for (const symbol of Object.keys(prices)) {
+    let newest = "";
+    for (const day of prices[symbol].keys()) {
+      if (day > newest) {
+        newest = day;
+      }
+    }
+    lastPriceDay[symbol] = newest;
+  }
+
   // Shares of a trade in today's units: a trade made before a split or bonus
   // on record counts as more shares now. Same rows the positions use. A change
-  // counts only once the price history has reached its date, because only
-  // then are the stored prices divided for it.
-  const lastDay = days[days.length - 1];
+  // counts only once that stock's own price history has reached its date,
+  // because only then are its stored prices divided for it.
   const sharesToday = (trade) => {
     let quantity = trade.quantity;
     for (const change of shareChanges) {
       if (
         change.symbol === trade.symbol &&
         change.date > trade.date &&
-        change.date <= lastDay
+        change.date <= (lastPriceDay[trade.symbol] ?? "")
       ) {
         quantity = quantity * change.ratio;
       }
@@ -146,6 +158,10 @@ export const walkPortfolio = (trades, prices, shareChanges = [], mergers = []) =
     //    whole shares only, the fraction is paid in cash.
     for (const merger of mergers) {
       if (merger.date > day || mergersDone.includes(merger)) {
+        continue;
+      }
+      // Wait until the new stock has a price, or the swapped shares would be worth zero.
+      if (priceOf(merger.toSymbol, day) <= 0) {
         continue;
       }
       mergersDone.push(merger);

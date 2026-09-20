@@ -81,8 +81,15 @@ const runDailySync = async () => {
 
 // Wait a random slice of the evening, then run. Each night lands somewhere
 // different between SYNC_START_HOUR and five hours later.
-const runAtARandomTime = async () => {
-  await pause(0, SYNC_JITTER_MINUTES * 60 * 1000);
+const runAtARandomTime = async (tick) => {
+  //tick.date is the start hour this run was planned for. a run that starts late (the laptop
+  //was asleep) only waits for what is left of the evening, so it never lands in the night
+  const windowEnd = tick.date.getTime() + SYNC_JITTER_MINUTES * 60 * 1000;
+  let timeLeft = windowEnd - Date.now();
+  if (timeLeft < 0) {
+    timeLeft = 0;
+  }
+  await pause(0, timeLeft);
   console.log(`[sync] starting at ${new Date().toISOString()}`);
   await runDailySync();
 };
@@ -104,14 +111,20 @@ const catchUpIfMissed = async () => {
   const { today, hour, isWeekday } = karachiNow();
   if (!isWeekday || hour < SYNC_START_HOUR) return;
 
-  //a sync from earlier in the day does not count, its prices were not the closing ones
+  //a sync from earlier in the day does not count, its prices were not the closing ones.
+  //a run that failed counts as missed too: the sync time is saved after the trades step,
+  //so a failure in the price step would otherwise look like a finished sync
   const startHour = String(SYNC_START_HOUR).padStart(2, "0");
   const syncStartToday = new Date(`${today}T${startHour}:00:00+05:00`);
   const missed = await prisma.brokerAccount.count({
     where: {
       credentialsEnc: { not: null },
       syncStatus: { not: SYNC_STATUS.DISCONNECTED },
-      OR: [{ lastSyncedAt: null }, { lastSyncedAt: { lt: syncStartToday } }],
+      OR: [
+        { lastSyncedAt: null },
+        { lastSyncedAt: { lt: syncStartToday } },
+        { syncStatus: SYNC_STATUS.ERROR },
+      ],
     },
   });
   if (missed === 0) return;
