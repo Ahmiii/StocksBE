@@ -37,12 +37,26 @@ const savePrices = async (securityId, bars) => {
     volume: BigInt(Math.round(bar.volume ?? 0)),
   }));
 
-  const result = await prisma.dailyPrice.createMany({
-    data: rows,
-    skipDuplicates: true,
-  });
+  if (rows.length === 0) {
+    return 0;
+  }
 
-  return result.count;
+  //the days the provider sent
+  const days = [];
+  for (const row of rows) {
+    //a price of zero means the provider's answer is broken, keep what we have
+    if (row.close <= 0) {
+      return 0;
+    }
+    days.push(row.tradeDate);
+  }
+
+  //remove our rows for those days and save the provider's rows, together, so nothing is lost if saving fails
+  const results = await prisma.$transaction([
+    prisma.dailyPrice.deleteMany({ where: { securityId, tradeDate: { in: days } } }),
+    prisma.dailyPrice.createMany({ data: rows, skipDuplicates: true }),
+  ]);
+  return results[1].count;
 };
 
 // Fetches the missing daily bars for everything held or watched, plus the
@@ -79,7 +93,7 @@ const syncPricesForAccount = async (account) => {
         where: { volume: { not: null } },
         orderBy: { tradeDate: "desc" },
         take: 1,
-        select: { tradeDate: true },
+        select: { tradeDate: true, fetchedAt: true },
       },
     },
     orderBy: { symbol: "asc" },
@@ -88,12 +102,18 @@ const syncPricesForAccount = async (account) => {
   const today = new Date().toLocaleDateString("en-CA", {
     timeZone: "Asia/Karachi",
   });
+  //a price row saved before the market closed may not be the final one. 16:30 covers friday's later close
+  const marketClose = new Date(`${today}T16:30:00+05:00`);
 
   const results = [];
 
   for (const security of securities) {
     const lastFullPrice = security.dailyPrices[0]; // newest row with open/high/low/volume
-    if (lastFullPrice && lastFullPrice.tradeDate.toISOString().slice(0, 10) >= today) {
+    if (
+      lastFullPrice &&
+      lastFullPrice.tradeDate.toISOString().slice(0, 10) >= today &&
+      lastFullPrice.fetchedAt >= marketClose
+    ) {
       results.push({ symbol: security.symbol, skipped: "already current" });
       continue;
     }

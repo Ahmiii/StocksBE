@@ -2,7 +2,7 @@ import { prisma } from "../config/db.js";
 import { fetchDashboardApi } from "../services/dashboardApi.js";
 import { pauseBetweenCalls, providerSaysStop } from "../utils/pace.js";
 
-const STATEMENTS = ["fundamentals", "income", "balance"];
+const STATEMENTS = ["fundamentals", "income", "balance", "cashflow"];
 
 const statementDashboardApi = async (symbol, statement, account) => {
   const { id, clientCode } = account;

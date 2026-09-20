@@ -493,7 +493,14 @@ const syncAccount = async ({ account, session, params }) => {
   const tradeDate = new Date();
   tradeDate.setUTCHours(0, 0, 0, 0);
 
-  const priceUpsert = collateralRows
+  //no trading on saturday and sunday, so no price row for those days
+  const dayOfWeek = tradeDate.getUTCDay();
+  let priceRows = collateralRows;
+  if (dayOfWeek === 0 || dayOfWeek === 6) {
+    priceRows = [];
+  }
+
+  const priceUpsert = priceRows
     .filter(
       (row) => securityIdBySymbol.get(row?.symbol) && row?.mtmPrice != null,
     )

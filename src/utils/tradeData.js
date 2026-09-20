@@ -72,6 +72,10 @@ export const mergePositions = ({
     if (!securityId) continue;
 
     const fromTrades = bySecurityId.get(securityId);
+    //more shares in the trades than the broker holds means the rest were moved to the sub-investor account
+    if (fromTrades && fromTrades.quantity > Number(row?.quantityTotal)) {
+      continue;
+    }
     bySecurityId.set(securityId, {
       securityId,
       quantity: Number(row?.quantityTotal),
