@@ -57,6 +57,10 @@ const SYNC_START_HOUR = 18;
 const SYNC_JITTER_MINUTES = 5 * 60;
 const SYNC_SCHEDULE = `0 ${SYNC_START_HOUR} * * 1-5`;
 
+// 401 is only for our own login. A problem with the broker or the market data
+// provider answers with this status, because the app signs the user out on any 401.
+const BROKER_PROBLEM_STATUS = 400;
+
 // Path the login form posts to, relative to BROKER_URL.
 const BROKER_LOGIN_PATH = "/Home/_Login";
 
@@ -110,4 +114,5 @@ export {
   INVALID_LOGIN_PATTERN,
   BROKER_ANALYTICS_PATH,
   BROKER_SYMBOLS_PATH,
+  BROKER_PROBLEM_STATUS,
 };

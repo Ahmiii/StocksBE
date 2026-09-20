@@ -2,6 +2,7 @@ import { prisma } from "../config/db.js";
 import { fetchDashboardApi } from "../services/dashboardApi.js";
 import { pauseBetweenCalls, providerSaysStop } from "../utils/pace.js";
 import { formatDate } from "../utils/dateRange.js";
+import { BROKER_PROBLEM_STATUS } from "../config/constants.js";
 
 // Turns the provider's rows into actions. Takes the rows, returns the list.
 
@@ -47,7 +48,31 @@ const payoutFilterData = (securityPayout) => {
       });
     }
   }
-  return cleanPayoutData;
+
+  //the provider publishes a dividend a second time when its ex-date is corrected. of two rows with
+  //the same amount and ex-dates within two weeks, only the newer one (the larger provider id) is kept
+  const TWO_WEEKS_MS = 14 * 24 * 60 * 60 * 1000;
+  const withoutRepeats = [];
+  for (const payout of cleanPayoutData) {
+    let newerCopyExists = false;
+    for (const other of cleanPayoutData) {
+      if (payout.type !== "DIVIDEND" || other.type !== "DIVIDEND" || other === payout) {
+        continue;
+      }
+      const timeApart = Math.abs(new Date(other.exDate) - new Date(payout.exDate));
+      if (
+        other.amount === payout.amount &&
+        timeApart <= TWO_WEEKS_MS &&
+        Number(other.providerId) > Number(payout.providerId)
+      ) {
+        newerCopyExists = true;
+      }
+    }
+    if (!newerCopyExists) {
+      withoutRepeats.push(payout);
+    }
+  }
+  return withoutRepeats;
 };
 
 const savePayoutInDB = async (securityId, cleanPayoutData) => {
@@ -146,7 +171,7 @@ const saveSingleSecuritiesPayout = async (req, res) => {
   try {
     securityPayout = await payoutDashboardApi(symbol, account);
   } catch (error) {
-    return res.status(401).json({ error: error.message });
+    return res.status(BROKER_PROBLEM_STATUS).json({ error: error.message });
   }
   const cleanPayoutData = payoutFilterData(securityPayout);
   const saved = await savePayoutInDB(security.id, cleanPayoutData);
@@ -177,7 +202,7 @@ const saveBulkSecuritiesPayout = async (req, res) => {
   try {
     data = await saveAllSecuritiesPayoutPerAccount(account);
   } catch (error) {
-    return res.status(401).json({ error: error.message });
+    return res.status(BROKER_PROBLEM_STATUS).json({ error: error.message });
   }
   res.status(200).json({ message: "success", data });
 };

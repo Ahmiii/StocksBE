@@ -6,6 +6,7 @@ import {
   BROKER_URL,
   BROKER_SYMBOLS_PATH,
   BROKER_HOUSE_NAME,
+  BROKER_PROBLEM_STATUS,
 } from "../config/constants.js";
 import { buildCookieHeader } from "../utils/extractAHLInfor.js";
 import { parseDateRange, formatDate, marketCloseOn } from "../utils/dateRange.js";
@@ -187,7 +188,7 @@ const syncPrices = async (req, res) => {
   try {
     data = await syncPricesForAccount(account);
   } catch (error) {
-    return res.status(401).json({ error: error.message });
+    return res.status(BROKER_PROBLEM_STATUS).json({ error: error.message });
   }
 
   res.status(200).json({ message: "success", data });
@@ -239,7 +240,7 @@ const syncSecurities = async (req, res) => {
 
   const session = getSession(account.id);
   if (!session) {
-    return res.status(401).json({ error: "Broker session expired. Reconnect the account." });
+    return res.status(BROKER_PROBLEM_STATUS).json({ error: "Broker session expired. Reconnect the account." });
   }
 
   const jar = {
@@ -288,7 +289,7 @@ const searchSecurities = async (req, res) => {
   const q = String(req.query.q ?? "").trim();
   if (q.length < 2) return res.status(400).json({ error: "q must be at least 2 characters" });
 
-  const securities = await prisma.security.findMany({
+  const found = await prisma.security.findMany({
     where: {
       OR: [
         { symbol: { contains: q, mode: "insensitive" } },
@@ -302,8 +303,20 @@ const searchSecurities = async (req, res) => {
     },
     select: { id: true, symbol: true, companyName: true, sector: true },
     orderBy: { symbol: "asc" },
-    take: 20,
   });
+
+  //a symbol that starts with what was typed comes first, then the rest. typing "ps" should show PSO before a company with "pumps" in its name
+  const typed = q.toLowerCase();
+  const symbolMatches = [];
+  const otherMatches = [];
+  for (const security of found) {
+    if (security.symbol.toLowerCase().startsWith(typed)) {
+      symbolMatches.push(security);
+    } else {
+      otherMatches.push(security);
+    }
+  }
+  const securities = [...symbolMatches, ...otherMatches].slice(0, 20);
 
   res.status(200).json({ message: "success", data: { securities } });
 };
@@ -361,12 +374,16 @@ const getTrend = async (req, res) => {
   }));
 
   const last = series.at(-1);
+  //the stock's own newest price. the series ends on the last day it shares with the index, which can be a day older
+  const newest = stock[stock.length - 1];
   res.status(200).json({
     message: "success",
     data: {
       symbol,
       period,
       range: { from: series[0].date, to: last.date },
+      lastClose: Number(newest.close),
+      lastCloseDate: day(newest),
       series,
       summary: {
         stockReturn: last.stock - 100,

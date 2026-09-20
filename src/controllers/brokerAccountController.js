@@ -12,6 +12,7 @@ import {
   BROKER_COLLATERALS_PATH,
   BROKER_HOUSE_NAME,
   HISTORY_DEFAULT_FROM,
+  BROKER_PROBLEM_STATUS,
 } from "../config/constants.js";
 import {
   extractSessionCookie,
@@ -215,7 +216,7 @@ const brokerLogin = async ({ accountNumber, password }) => {
   });
 
   if (isInvalidLogin(login.html)) {
-    return { ok: false, status: 401, error: "Invalid broker credentials." };
+    return { ok: false, status: BROKER_PROBLEM_STATUS, error: "Invalid broker credentials." };
   }
 
   return {
@@ -355,7 +356,7 @@ const syncAccount = async ({ account, session, params }) => {
     clearSession(account.id);
     return {
       ok: false,
-      status: 401,
+      status: BROKER_PROBLEM_STATUS,
       error: "Broker session expired. Reconnect the account to continue.",
     };
   }
@@ -559,7 +560,7 @@ const syncAccount = async ({ account, session, params }) => {
 };
 
 // Reads the broker's order history for one linked account. This does not log
-// in — it replays the cached session, so an expired one is a 401 telling the
+// in — it replays the cached session, so an expired one is an error telling the
 // client to reconnect.
 const getHistory = async (req, res) => {
   const account = await prisma.brokerAccount.findFirst({
@@ -573,7 +574,7 @@ const getHistory = async (req, res) => {
 
   const session = getSession(account.id);
   if (!session) {
-    return res.status(401).json({
+    return res.status(BROKER_PROBLEM_STATUS).json({
       error: "Broker session expired. Reconnect the account to continue.",
     });
   }

@@ -200,6 +200,12 @@ const positionsList = async (req, res) => {
       .sort()
       .at(-1) ?? null;
 
+  //realized profit is for the whole history, not only for the stocks held inside the chosen range
+  let realizedPnl = 0;
+  for (const row of positionRows) {
+    realizedPnl = realizedPnl + Number(row.realizedPnl);
+  }
+
   res?.status(200)?.json({
     message: "success",
     data: {
@@ -217,7 +223,7 @@ const positionsList = async (req, res) => {
         dayChangeAsOf: newestPriceDate ? formatDate(newestPriceDate) : null,
         dayChangeFrom,
         dayChangeCoverage,
-        realizedPnl: positions.reduce((sum, p) => sum + p.realizedPnl, 0),
+        realizedPnl,
         openPositions: open.length,
         pricedPositions: priced.length,
         unpricedPositions: open.length - priced.length,
@@ -256,7 +262,13 @@ const tradeList = async (req, res) => {
           },
         },
       },
-      orderBy: [{ executedAt: "desc" }, { id: "asc" }],
+      //the broker gives the day only, so trades of one day are grouped by stock, buys before sells. id last keeps the pages stable
+      orderBy: [
+        { executedAt: "desc" },
+        { security: { symbol: "asc" } },
+        { side: "asc" },
+        { id: "asc" },
+      ],
       take: limit,
       skip: offset,
     }),
@@ -417,7 +429,13 @@ const incomeFromDividends = async (req, res) => {
     symbolOf[security.id] = security.symbol;
   }
 
-  const received = dividendsReceived(trades, shareChanges, dividends, symbolOf);
+  //a stock swapped into another one, like ENGRO into ENGROH: its shares earn the new stock's dividends
+  const mergers = await prisma.corporateAction.findMany({
+    where: { type: "MERGER", ratio: { not: null }, exDate: { lte: today } },
+    orderBy: { exDate: "asc" },
+  });
+
+  const received = dividendsReceived(trades, shareChanges, dividends, symbolOf, mergers);
 
   //add up per stock and in total
   const byStock = [];
@@ -444,7 +462,7 @@ const incomeFromDividends = async (req, res) => {
   });
   const upcomingDividend = [];
   for (const dividend of announced) {
-    const shares = sharesHeldOn(trades, shareChanges, dividend.securityId, dividend.exDate);
+    const shares = sharesHeldOn(trades, shareChanges, dividend.securityId, dividend.exDate, mergers);
     if (shares === 0) {
       continue;
     }

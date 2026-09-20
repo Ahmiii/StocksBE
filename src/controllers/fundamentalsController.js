@@ -1,6 +1,7 @@
 import { prisma } from "../config/db.js";
 import { fetchDashboardApi } from "../services/dashboardApi.js";
 import { pauseBetweenCalls, providerSaysStop } from "../utils/pace.js";
+import { BROKER_PROBLEM_STATUS } from "../config/constants.js";
 
 const STATEMENTS = ["fundamentals", "income", "balance", "cashflow"];
 
@@ -76,7 +77,7 @@ const saveBulkSecuritiesFundamentals = async (req, res) => {
   try {
     data = await saveAllSecuritiesFundamentalsPerAccount(account);
   } catch (error) {
-    return res.status(401).json({ error: error.message });
+    return res.status(BROKER_PROBLEM_STATUS).json({ error: error.message });
   }
   res.status(200).json({ message: "success", data });
 };
