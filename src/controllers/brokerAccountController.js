@@ -435,9 +435,9 @@ const syncAccount = async ({ account, session, params }) => {
     },
     orderBy: { executedAt: "asc" },
   });
-  //changes in share like give bonus share or split of share
+  //changes in share like give bonus share or split of share. one that is announced but not yet in effect is left out
   const shareChanges = await prisma.corporateAction.findMany({
-    where: { type: { in: ["BONUS_SHARE", "SPLIT"] } },
+    where: { type: { in: ["BONUS_SHARE", "SPLIT"] }, exDate: { lte: new Date() } },
     orderBy: { exDate: "asc" },
   });
 

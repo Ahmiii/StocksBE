@@ -297,14 +297,34 @@ const benchmark = async (req, res) => {
   if (!portfolio)
     return res.status(404).json({ error: "Portfolio not found." });
 
-  const { trades, positions, prices } = await loadBenchmarkData(portfolioId);
+  const { trades, positions, prices, shareChanges } =
+    await loadBenchmarkData(portfolioId);
   if (!trades.length)
     return res.status(400).json({ error: "No trades to benchmark." });
   if (!prices.KSE100)
     return res.status(400).json({ error: "KSE100 prices not synced yet." });
 
-  const splits = detectAdjustedSplits(trades, prices);
-  const walk = walkPortfolio(trades, prices, splits);
+  const walk = walkPortfolio(trades, prices, shareChanges);
+
+  //a trade paid far above the stored price, with no split or bonus on record after it, means a row is missing in corporate_actions
+  const detected = detectAdjustedSplits(trades, prices);
+  const unrecordedSplits = [];
+  for (const symbol of Object.keys(detected)) {
+    //what the splits and bonuses on record after that trade add up to
+    let recorded = 1;
+    for (const change of shareChanges) {
+      if (change.symbol === symbol && change.date > detected[symbol].lastPreDate) {
+        recorded = recorded * change.ratio;
+      }
+    }
+    if (detected[symbol].ratio / recorded >= 1.6) {
+      unrecordedSplits.push({
+        symbol,
+        ratio: detected[symbol].ratio,
+        lastTradeBefore: detected[symbol].lastPreDate,
+      });
+    }
+  }
   const series = walk.series;
   const first = series[0];
   const last = series[series.length - 1];
@@ -358,11 +378,8 @@ const benchmark = async (req, res) => {
     })),
     positions: positionsVsBenchmark(positions, trades, prices, asOf),
     dataNotes: {
-      adjustedSplits: Object.entries(splits).map(([symbol, split]) => ({
-        symbol,
-        ratio: split.ratio,
-        lastPreSplitTrade: split.lastPreDate,
-      })),
+      adjustedSplits: shareChanges,
+      unrecordedSplits,
       dividendsIncluded: false,
     },
   };

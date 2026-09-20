@@ -66,7 +66,28 @@ const loadBenchmarkData = async (portfolioId) => {
     prices[symbol].set(formatDate(bar.tradeDate), Number(bar.close));
   }
 
-  return { trades, positions, prices };
+  //splits and bonus shares on record, so a trade made before one can be counted in today's shares.
+  //one that is announced but not yet in effect is left out, the prices are not divided for it yet
+  const shareChangeRows = await prisma.corporateAction.findMany({
+    where: {
+      type: { in: ["BONUS_SHARE", "SPLIT"] },
+      ratio: { not: null },
+      exDate: { lte: new Date() },
+      security: { symbol: { in: symbols } },
+    },
+    orderBy: { exDate: "asc" },
+    select: { exDate: true, ratio: true, security: { select: { symbol: true } } },
+  });
+  const shareChanges = [];
+  for (const row of shareChangeRows) {
+    shareChanges.push({
+      symbol: row.security.symbol,
+      date: formatDate(row.exDate),
+      ratio: Number(row.ratio),
+    });
+  }
+
+  return { trades, positions, prices, shareChanges };
 };
 
 // Percent change of both lines between two points of the series.

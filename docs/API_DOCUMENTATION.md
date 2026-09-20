@@ -955,9 +955,10 @@ The whole portfolio against `KSE100`, computed on read from `trades` and `daily_
     ],
     "dataNotes": {
       "adjustedSplits": [
-        { "symbol": "BAFL", "ratio": 2, "lastPreSplitTrade": "2024-07-29" },
-        { "symbol": "SYS", "ratio": 5, "lastPreSplitTrade": "2025-05-07" }
+        { "symbol": "SYS", "date": "2025-06-04", "ratio": 5 },
+        { "symbol": "BAFL", "date": "2026-04-20", "ratio": 2 }
       ],
+      "unrecordedSplits": [],
       "dividendsIncluded": false
     }
   }
@@ -974,7 +975,8 @@ The whole portfolio against `KSE100`, computed on read from `trades` and `daily_
 | `phases` | The time-weighted return split at 2026-02-01 — the sentence that explains the chart. One phase if every trade is after the cut. |
 | `series` | One point per trading day (union of `KSE100` bar dates and trade dates). |
 | `positions` | Open positions only, sorted by `costBasis` desc. `buyDate` is the cost-weighted average of the buys, moved to the next trading day; `benchmarkReturn` is `KSE100` over `buyDate → asOf`. |
-| `dataNotes.adjustedSplits` | The stored price history is already divided for past splits; a trade priced far above that day's stored close reveals one. Pre-split trade quantities are multiplied by `ratio` when valuing holdings. |
+| `dataNotes.adjustedSplits` | Every `SPLIT` and `BONUS_SHARE` row on record in `corporate_actions` for the traded stocks (`date` is the ex date). The stored price history is already divided for them, so a trade made before one is multiplied by its `ratio` when valuing holdings, buys and sells alike. These are the same rows the positions use. |
+| `dataNotes.unrecordedSplits` | A warning, normally empty. A trade paid far above that day's stored close, with no split or bonus on record after it, means a row is missing in `corporate_actions`. The `ratio` here is a guess from prices and is never used in the numbers. Because old prices shrink a little with every dividend, an old trade of a high-dividend stock can appear here falsely after several years. |
 
 The maths, the verification against the live data, and the roadmap (corporate actions table, extra screens) are in [`BENCHMARK_ANALYTICS.md`](BENCHMARK_ANALYTICS.md).
 

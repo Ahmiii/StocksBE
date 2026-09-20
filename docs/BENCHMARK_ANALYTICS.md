@@ -343,7 +343,8 @@ This is what turned "no splits detected" into a walk that matches the snapshot t
     ],
 
     "dataNotes": {
-      "adjustedSplits": [ { "symbol": "SYS", "ratio": 5, "lastPreSplitTrade": "2025-05-07" } ],
+      "adjustedSplits": [ { "symbol": "SYS", "date": "2025-06-04", "ratio": 5 } ],
+      "unrecordedSplits": [],
       "dividendsIncluded": false
     }
   }
@@ -357,10 +358,10 @@ The `phases` block is the sentence that explains the whole chart — *"behind in
 **`src/utils/benchmark.js`** — pure functions, no DB, so they can be tested on a saved set of trades:
 
 ```js
-detectAdjustedSplits(trades, prices)
+detectAdjustedSplits(trades, prices)          // warning only, never used in the numbers
   → { SYS: { ratio: 5, lastPreDate: "2025-05-07" } }
 
-walkPortfolio(trades, prices, splits)
+walkPortfolio(trades, prices, shareChanges)   // shareChanges = SPLIT and BONUS_SHARE rows on record
   → { series, netCashIn, portfolioValue, shadowValue, twr, maxDrawdown }
 
 xirr(flows)

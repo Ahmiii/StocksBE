@@ -28,8 +28,9 @@ const cashOut = (trade) =>
 
 // The price history is stored already divided for past splits. So a trade
 // priced far above that day's stored close reveals a split: paying 511 when
-// the stored close is 101 means 5:1, and every trade up to that day must
-// count 5x when valuing holdings.
+// the stored close is 101 means 5:1. Used only as a warning that a row is
+// missing in corporate_actions. The ratio is a guess and drifts with every
+// dividend, so the walk never uses it.
 export const detectAdjustedSplits = (trades, prices) => {
   const splits = {};
   for (const trade of trades) {
@@ -81,17 +82,29 @@ const priceLookup = (prices, days) => {
 //   benchmark – KSE100 rebased to the first trade.
 // Every rupee spent also buys KSE100 units that day, which gives the
 // "same money into the index" shadow value.
-export const walkPortfolio = (trades, prices, splits = {}) => {
+export const walkPortfolio = (trades, prices, shareChanges = []) => {
   const days = tradingDays(trades, prices);
   const priceOf = priceLookup(prices, days);
   const tradesOn = Object.groupBy(trades, (trade) => trade.date);
   const indexStart = priceOf(INDEX, days[0]);
 
-  // Shares a BUY adds, in today's post-split units.
-  const sharesBought = (trade) => {
-    const split = splits[trade.symbol];
-    const beforeSplit = split && trade.date <= split.lastPreDate;
-    return beforeSplit ? trade.quantity * split.ratio : trade.quantity;
+  // Shares of a trade in today's units: a trade made before a split or bonus
+  // on record counts as more shares now. Same rows the positions use. A change
+  // counts only once the price history has reached its date, because only
+  // then are the stored prices divided for it.
+  const lastDay = days[days.length - 1];
+  const sharesToday = (trade) => {
+    let quantity = trade.quantity;
+    for (const change of shareChanges) {
+      if (
+        change.symbol === trade.symbol &&
+        change.date > trade.date &&
+        change.date <= lastDay
+      ) {
+        quantity = quantity * change.ratio;
+      }
+    }
+    return quantity;
   };
 
   const holdings = {};
@@ -122,7 +135,8 @@ export const walkPortfolio = (trades, prices, splits = {}) => {
       const cash = cashOut(trade);
       netCashIn += cash;
       indexUnits += cash / priceOf(INDEX, day);
-      const change = trade.side === "BUY" ? sharesBought(trade) : -trade.quantity;
+      const shares = sharesToday(trade);
+      const change = trade.side === "BUY" ? shares : -shares;
       holdings[trade.symbol] = (holdings[trade.symbol] ?? 0) + change;
     }
 

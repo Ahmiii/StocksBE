@@ -37,26 +37,33 @@ const savePrices = async (securityId, bars) => {
     volume: BigInt(Math.round(bar.volume ?? 0)),
   }));
 
-  if (rows.length === 0) {
-    return 0;
-  }
-
-  //the days the provider sent
+  //a row without a price above zero is left out, so our stored row for that day stays
+  const goodRows = [];
   const days = [];
+  let newestDay;
   for (const row of rows) {
-    //a price of zero means the provider's answer is broken, keep what we have
-    if (row.close <= 0) {
-      return 0;
+    if (row.close > 0) {
+      goodRows.push(row);
+      days.push(row.tradeDate);
+      if (!newestDay || row.tradeDate > newestDay) {
+        newestDay = row.tradeDate;
+      }
     }
-    days.push(row.tradeDate);
+  }
+  if (goodRows.length === 0) {
+    return 0;
   }
 
   //remove our rows for those days and save the provider's rows, together, so nothing is lost if saving fails
   const results = await prisma.$transaction([
     prisma.dailyPrice.deleteMany({ where: { securityId, tradeDate: { in: days } } }),
-    prisma.dailyPrice.createMany({ data: rows, skipDuplicates: true }),
+    //a broker row (no volume) older than the provider's newest day, on a day the provider skipped, was a holiday
+    prisma.dailyPrice.deleteMany({
+      where: { securityId, volume: null, tradeDate: { lt: newestDay } },
+    }),
+    prisma.dailyPrice.createMany({ data: goodRows, skipDuplicates: true }),
   ]);
-  return results[1].count;
+  return results[2].count;
 };
 
 // Fetches the missing daily bars for everything held or watched, plus the
