@@ -65,6 +65,40 @@ const saveAllSecuritiesFundamentalsPerAccount = async (account) => {
   };
 };
 
+//fetch and save one stock's four statements, for a stock that is not held or watched yet
+const saveSingleSecuritiesFundamentals = async (req, res) => {
+  const symbol = req.params.symbol.toUpperCase();
+  const security = await prisma.security.findUnique({ where: { symbol } });
+  if (!security) {
+    return res.status(404).json({ error: "security does not exist" });
+  }
+
+  const account = await prisma.brokerAccount.findFirst({
+    where: { userId: req.user.id },
+    select: { id: true, clientCode: true },
+  });
+  if (!account) {
+    return res.status(404).json({ error: "No broker account linked." });
+  }
+
+  let saved = 0;
+  try {
+    for (const statement of STATEMENTS) {
+      const payload = await statementDashboardApi(symbol, statement, account);
+      //an ETF answers with no fields, nothing to keep
+      if (payload.fields) {
+        await saveStatementInDB(security.id, statement, payload);
+        saved = saved + 1;
+      }
+      await pauseBetweenCalls();
+    }
+  } catch (error) {
+    return res.status(BROKER_PROBLEM_STATUS).json({ error: error.message });
+  }
+
+  res.status(200).json({ message: "success", data: { symbol, saved } });
+};
+
 const saveBulkSecuritiesFundamentals = async (req, res) => {
   const account = await prisma.brokerAccount.findFirst({
     where: { id: req.params.id, userId: req.user.id },
@@ -82,4 +116,8 @@ const saveBulkSecuritiesFundamentals = async (req, res) => {
   res.status(200).json({ message: "success", data });
 };
 
-export { saveAllSecuritiesFundamentalsPerAccount, saveBulkSecuritiesFundamentals };
+export {
+  saveAllSecuritiesFundamentalsPerAccount,
+  saveSingleSecuritiesFundamentals,
+  saveBulkSecuritiesFundamentals,
+};

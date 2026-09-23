@@ -93,6 +93,11 @@ const BROKER_ANALYTICS_PATH = "/Home/GetAnalyticsURL";
 
 // Every tradable symbol on the exchange. "Symols" is the broker's typo.
 const BROKER_SYMBOLS_PATH = "/Home/GetSymolsList";
+// Reverse DCF. r = risk free + premium. The risk-free rate is the 10-year PIB yield, set by hand for now.
+const RISK_FREE_RATE = 0.11;
+const EQUITY_PREMIUM = 0.06;
+const TERMINAL_GROWTH = 0.05;
+const GROWTH_YEARS = 5;
 
 export {
   BROWSER_HEADERS,
@@ -115,4 +120,8 @@ export {
   BROKER_ANALYTICS_PATH,
   BROKER_SYMBOLS_PATH,
   BROKER_PROBLEM_STATUS,
+  RISK_FREE_RATE,
+  EQUITY_PREMIUM,
+  TERMINAL_GROWTH,
+  GROWTH_YEARS,
 };
