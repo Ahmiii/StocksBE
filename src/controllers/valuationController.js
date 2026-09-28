@@ -73,8 +73,12 @@ const getValuation = async (req, res) => {
     splits,
   );
   if (shares === null) {
-    // same applicable: false answer, reason "share count could not be confirmed"
-  }
+  return res.status(200).json({
+    message: "success",
+    data: { symbol, applicable: false, reason: "share count could not be confirmed" },
+  });
+}
+
   const isBank = security.sector === "COMMERCIAL BANKS";
   const cash = startingCash(statements.cashflow, statements.income, isBank);
   if (cash === null) {

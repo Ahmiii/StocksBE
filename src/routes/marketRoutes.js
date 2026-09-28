@@ -33,3 +33,4 @@ router.post("/fundamentals/:symbol", saveSingleSecuritiesFundamentals);
 router.post("/bulk-fundamentals/sync/:id", saveBulkSecuritiesFundamentals);
 
 export default router;
+ 
