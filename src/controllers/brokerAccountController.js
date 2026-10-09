@@ -17,7 +17,6 @@ import {
 import {
   extractSessionCookie,
   parseSetCookies,
-  parseEnabledDigits,
   isInvalidLogin,
   buildLoginBody,
   buildCookieHeader,
@@ -44,8 +43,8 @@ const NO_REDIRECT = {
   responseType: "text",
 };
 
-// Step 1 — load the login page to learn the session cookie and which password
-// positions this attempt is asking for.
+// Step 1 — load the login page. Since October 2026 it is a plain user name +
+// password form that sets no cookie of its own; the session comes with the POST.
 const fetchLoginPage = async () => {
   const response = await axios.get(BROKER_URL, {
     headers: {
@@ -60,39 +59,33 @@ const fetchLoginPage = async () => {
     html: response.data,
     sessionCookie: extractSessionCookie(response),
     cookieJar: parseSetCookies(response),
-    enabledDigits: parseEnabledDigits(response.data),
   };
 };
 
-// Step 2 — post the credentials back, echoing the session cookie the login page
-// handed us. The broker refreshes that cookie and may add trader/HouseName.
-const submitLogin = async ({
-  accountNumber,
-  password,
-  sessionCookie,
-  enabledDigits,
-}) => {
+// Step 2 — post the user name and password. On success the broker answers
+// 302 to /Home/Index and sets the session cookie plus trader/HouseName.
+const submitLogin = async ({ accountNumber, password, cookieJar }) => {
+  const headers = {
+    ...BROWSER_HEADERS,
+    ...NAVIGATION_HEADERS,
+    "content-type": "application/x-www-form-urlencoded",
+    "cache-control": "max-age=0",
+    Origin: BROKER_URL,
+    Referer: `${BROKER_URL}/`,
+  };
+  if (Object.keys(cookieJar).length > 0) {
+    headers.cookie = buildCookieHeader(cookieJar);
+  }
   const response = await axios.post(
     `${BROKER_URL}${BROKER_LOGIN_PATH}`,
-    buildLoginBody(accountNumber, password, enabledDigits),
-    {
-      headers: {
-        ...BROWSER_HEADERS,
-        ...NAVIGATION_HEADERS,
-        "content-type": "application/x-www-form-urlencoded",
-        "cache-control": "max-age=0",
-        Origin: BROKER_URL,
-        Referer: `${BROKER_URL}/`,
-        cookie: sessionCookie,
-      },
-      ...NO_REDIRECT,
-    },
+    buildLoginBody(accountNumber, password),
+    { headers, ...NO_REDIRECT },
   );
 
   return {
     html: response.data,
     status: response.status,
-    sessionCookie: extractSessionCookie(response) ?? sessionCookie,
+    sessionCookie: extractSessionCookie(response),
     cookieJar: parseSetCookies(response),
   };
 };
@@ -183,40 +176,22 @@ const fetchColletralHistory = async ({ clientCode, session }) => {
 // endpoint and the nightly sync.
 const brokerLogin = async ({ accountNumber, password }) => {
   const loginPage = await fetchLoginPage();
-
-  if (!loginPage.sessionCookie) {
-    return {
-      ok: false,
-      status: 502,
-      error: "No session cookie was returned by the broker login page.",
-    };
-  }
-  if (loginPage.enabledDigits.length === 0) {
-    return {
-      ok: false,
-      status: 502,
-      error: "No enabled Digit fields were found in the broker login page.",
-    };
-  }
-
-  const lastDigit = Math.max(...loginPage.enabledDigits);
-  if (password.length < lastDigit) {
-    return {
-      ok: false,
-      status: 400,
-      error: `Password is too short: the broker asked for character ${lastDigit}.`,
-    };
-  }
-
   const login = await submitLogin({
     accountNumber,
     password,
-    sessionCookie: loginPage.sessionCookie,
-    enabledDigits: loginPage.enabledDigits,
+    cookieJar: loginPage.cookieJar,
   });
 
   if (isInvalidLogin(login.html)) {
     return { ok: false, status: BROKER_PROBLEM_STATUS, error: "Invalid broker credentials." };
+  }
+  //success is a redirect to the home page with a fresh session cookie
+  if (login.status !== 302 || !login.sessionCookie) {
+    return {
+      ok: false,
+      status: 502,
+      error: "The broker did not start a session.",
+    };
   }
 
   return {
@@ -235,7 +210,14 @@ const getAHLSession = async (req, res) => {
     });
   }
 
-  const login = await brokerLogin({ accountNumber, password });
+  let login;
+  try {
+    login = await brokerLogin({ accountNumber, password });
+  } catch (error) {
+    return res.status(BROKER_PROBLEM_STATUS).json({
+      error: `Could not reach the broker: ${error.message}`,
+    });
+  }
   if (!login.ok) {
     return res.status(login.status).json({ error: login.error });
   }

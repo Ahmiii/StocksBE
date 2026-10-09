@@ -35,20 +35,6 @@ export const parseSetCookies = (response) => {
   return jar;
 };
 
-// The login form renders one input per password character but disables all but
-// a random handful. Returns the 1-based positions we are asked to fill in.
-export const parseEnabledDigits = (html) => {
-  const enabled = [];
-  const inputRegex = /<input\b[^>]*\bname="Digit(\d+)"[^>]*>/gi;
-  let match;
-  while ((match = inputRegex.exec(html)) !== null) {
-    const tag = match[0];
-    const position = Number(match[1]);
-    if (!/\bdisabled\b/i.test(tag)) enabled.push(position);
-  }
-  return enabled;
-};
-
 export const isInvalidLogin = (html) => INVALID_LOGIN_PATTERN.test(html);
 
 // Flatten a { name: value } jar back into a Cookie header string, so a later
@@ -62,18 +48,6 @@ export const buildCookieHeader = (jar) =>
 /* Request building                                                           */
 /* -------------------------------------------------------------------------- */
 
-// Form body for the login POST: the account number plus one field per enabled
-// digit position, each holding a single character of the password.
-export const buildLoginBody = (username, password, enabledDigits) => {
-  const params = new URLSearchParams({ UserName: username });
-  for (const position of enabledDigits) {
-    const char = password[position - 1];
-    if (char === undefined) {
-      throw new Error(
-        `Password too short: needs a character at position ${position}, but it has only ${password.length}.`,
-      );
-    }
-    params.set(`Digit${position}`, char);
-  }
-  return params.toString();
-};
+// Form body for the login POST: the two fields of the login form.
+export const buildLoginBody = (username, password) =>
+  new URLSearchParams({ UserName: username, Password: password }).toString();
