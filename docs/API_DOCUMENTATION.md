@@ -3,7 +3,7 @@
 > One document that explains **what this backend does, how it is built, how the database is shaped, and how to call every API**.
 > Written in simple English so a new developer or a frontend developer can read it without opening the code.
 
-**Project:** `stock_portfolio_be` · **Author:** Ahmed Faraz · **Last updated:** 2026-09-13
+**Project:** `stock_portfolio_be` · **Author:** Ahmed Faraz · **Last updated:** 2026-10-11
 
 ---
 
@@ -43,6 +43,8 @@ In plain words, it lets a user:
 3. **Sync trade history** from the broker. Every buy and sell the user ever made is downloaded and saved.
 4. **See their portfolio**: which stocks they hold, how many shares, average cost, current price, profit/loss.
 5. **Download daily prices** (5 years of history) for every stock they own, plus the KSE-100 index, so charts and P&L can be shown.
+6. **Follow a watchlist and compare against the index**: the whole portfolio against KSE-100 with a time-weighted chart, XIRR and per-stock alpha.
+7. **See dividends, corporate actions, financial statements and a valuation**: what each stock paid and when, the company's statements from the analytics API, and a reverse DCF that says what yearly growth the current price assumes.
 
 The broker does not offer a public API. The backend talks to the broker's website the same way a browser would (it sends the same headers and cookies). This is the trickiest part of the project and is explained in [section 10](#10-how-the-broker-integration-works).
 
@@ -135,13 +137,13 @@ All variables live in `.env` (which is git-ignored — never commit it).
 Backend/
 ├── prisma/
 │   ├── schema.prisma            # Database models (source of truth for tables)
-│   └── migrations/              # SQL migration history (10 migrations)
+│   └── migrations/              # SQL migration history (12 migrations)
 ├── prisma7.config.ts            # Prisma 7 config: schema path, migrations path, DB URL
 ├── src/
 │   ├── server.js                # Entry point: creates Express app, mounts routes, handles shutdown
 │   ├── config/
 │   │   ├── db.js                # Creates the Prisma client (with pg adapter); connect/disconnect helpers
-│   │   └── constants.js         # Broker URLs, paths, browser headers, status values
+│   │   └── constants.js         # Broker URLs, paths, browser headers, status values, nightly-sync window, reverse-DCF assumptions
 │   ├── middlewares/
 │   │   └── authMiddleware.js    # Checks the Bearer JWT and loads req.user
 │   ├── routes/
@@ -156,6 +158,8 @@ Backend/
 │   │   ├── portfolioController.js # portfolio list, positions, trades, benchmark vs KSE100, dividend income
 │   │   ├── marketDataController.js # price sync, securities import + search, trend chart (provider calls live in services/dashboardApi.js)
 │   │   ├── corporateActionController.js # payouts from the provider (dividends, bonus, rights) → corporate_actions, one stock or every held + watched stock
+│   │   ├── fundamentalsController.js # the provider's four company statements (fundamentals, income, balance, cashflow) → fundamentals, one stock or every held + watched stock
+│   │   ├── valuationController.js # reverse DCF: the growth the current price assumes, computed from the stored statements
 │   │   └── watchlistController.js # watchlist list / add / remove
 │   ├── services/
 │   │   ├── brokderSessionStore.js # In-memory store for broker + market cookies
@@ -169,7 +173,7 @@ Backend/
 │   │   ├── pace.js              # Random pauses between provider calls, stop on 429 / 5xx (section 10.8)
 │   │   ├── secrets.js           # AES-256-GCM encrypt / decrypt for the stored broker password
 │   │   ├── generateToken.js     # Signs the JWT and sets a cookie
-│   │   └── test.js              # Old experiment script — NOT used by the server (see section 14)
+│   │   └── valuation.js         # Reverse DCF maths: periods by year, share count, starting cash, implied growth (section 9.4, endpoint 26)
 │   ├── jobs/
 │   │   └── dailySync.js         # Nightly sync: weekdays at a random time 18:00–23:00 Karachi, catch-up after a restart (section 10.6)
 │   └── generated/prisma/        # Generated Prisma client (git-ignored)
@@ -261,6 +265,7 @@ erDiagram
     securities ||--o{ watchlist_items : "watched"
     securities ||--o{ corporate_actions : "happened to"
     securities ||--o{ corporate_actions : "merged into"
+    securities ||--o{ fundamentals : "reported by"
 
     users {
         uuid id PK
@@ -362,6 +367,16 @@ erDiagram
         varchar(32) provider_id "nullable"
         timestamptz created_at
     }
+
+    fundamentals {
+        uuid id PK
+        uuid security_id FK
+        varchar(16) statement "fundamentals | income | balance | cashflow"
+        varchar(16) interval "annual"
+        jsonb payload "the provider's answer, saved whole"
+        timestamptz provider_at "nullable"
+        timestamptz fetched_at
+    }
 ```
 
 ### 7.2 Relationships in words
@@ -376,6 +391,7 @@ erDiagram
 | `portfolios` | `positions` | 1 → many | One position row per stock held in the portfolio. |
 | `securities` | `trades` / `positions` / `daily_prices` | 1 → many | A security (stock or index) is shared by everyone; it is not per-user. |
 | `users` / `securities` | `watchlist_items` | many ↔ many | A user's watchlist is a set of securities. The link row is per-user; the security itself is shared. |
+| `securities` | `fundamentals` | 1 → many | Up to four rows per stock, one per statement (fundamentals, income, balance, cashflow). Shared data, not per-user. |
 
 ### 7.3 Unique constraints and indexes
 
@@ -391,6 +407,7 @@ These matter because the sync code relies on them for "upsert" (insert-or-update
 | `positions` | `(portfolio_id, security_id)` | One position per stock per portfolio. Used to upsert positions. |
 | `daily_prices` | `(security_id, trade_date)` | One price bar per stock per day. Lets `createMany({ skipDuplicates })` re-run safely. |
 | `watchlist_items` | `(user_id, security_id)` | A stock is on a user's watchlist at most once. `POST /watchlist/:securityId` upserts against it, so adding twice is a no-op. |
+| `fundamentals` | `(security_id, statement)` | One saved answer per stock per statement. The statements sync upserts against it, so a refresh replaces the payload instead of adding a row. |
 
 | Table | Index | Purpose |
 |---|---|---|
@@ -420,6 +437,8 @@ These matter because the sync code relies on them for "upsert" (insert-or-update
 **`watchlist_items`** — one row per (user, security) the user wants to follow. It holds nothing but the link and when it was added; prices come from `daily_prices` at read time. Watched securities are automatically included in the price sync scope.
 
 **`corporate_actions`** — one row per event that changes what a share pays or how many you hold. `DIVIDEND`: `amount` is Rs per share. `BONUS_SHARE`: `ratio` is new shares per old, so a 10 % bonus is `1.1`. `RIGHT_SHARE`: `ratio` is the shares you may buy per share held and `amount` is their price; recorded, never applied, because taking up a right is a purchase you make separately. `SPLIT`: `ratio` is `2` for two-for-one. `MERGER`: `ratio` is new shares per old and `to_security_id` is the stock they became (ENGRO → ENGROH). `source` is `payouts` when the payouts sync wrote the row (section 10.6, endpoint 21) and `manual` for the rows only a person can know: the provider's feed carries dividends, bonuses and rights but **not** splits or mergers. `provider_id` is the provider's announcement id. Unique on (security, type, ex-date), so a re-sync updates a row instead of duplicating it. Read by the position rebuild (section 11.3, 11.4) and by the dividend income endpoint (22); nothing is stored back.
+
+**`fundamentals`** — the provider's company statements, saved whole. One row per stock per `statement`: `fundamentals` (41 ratios, each with the sector's min, median and max), `income`, `balance` and `cashflow` (annual, in Rs thousands; the newest period first, then up to seven fiscal years). `payload` is the provider's JSON exactly as it came, so a new ratio or a renamed field costs nothing; readers match periods by `periods[].year`, never by position, because the statements do not all start at the same period (income starts at TTM, balance at the latest quarter, cashflow has neither). Written by the statements sync (endpoints 24, 25) with an upsert on (security, statement); read by the valuation endpoint (26). An ETF answers with no `fields` and gets no row. Not refreshed by the nightly job (limitation 26).
 
 ---
 
@@ -486,8 +505,11 @@ Every protected endpoint filters by `req.user.id`. A user can only see or change
 | 19 | POST | `/broker/accounts/:id/full-sync` | 🔒 | The nightly routine on demand: log in with the stored password, then trades + prices + payouts |
 | 20 | POST | `/market/payout/:symbol` | 🔒 | Fetch one stock's dividends, bonus and right shares from the analytics API and save them to `corporate_actions` |
 | 21 | POST | `/market/bulk-payouts/sync/:id` | 🔒 | The same for every held + watched stock, one at a time with a pause; the nightly job runs this |
-| 23 | GET | `/market/payout/:symbol` | 🔒 | Everything on record for one stock: dividends, bonus, rights, splits, mergers. Reads the table only; feeds the stock screen |
 | 22 | GET | `/portfolio/:id/dividend-income` | 🔒 | Dividends you were entitled to since your first buy, per stock and in total, plus the announced ones ahead |
+| 23 | GET | `/market/payout/:symbol` | 🔒 | Everything on record for one stock: dividends, bonus, rights, splits, mergers. Reads the table only; feeds the stock screen |
+| 24 | POST | `/market/fundamentals/:symbol` | 🔒 | Fetch one stock's four statements from the analytics API and save them to `fundamentals` |
+| 25 | POST | `/market/bulk-fundamentals/sync/:id` | 🔒 | The same for every held + watched stock, one at a time with a pause |
+| 26 | GET | `/market/valuation/:symbol` | 🔒 | Reverse DCF: the yearly growth the current price assumes, next to the growth the company delivered |
 
 ---
 
@@ -579,7 +601,7 @@ Links an AHL eTrade account to the logged-in user. The server logs in to the bro
 | Field | Type | Required | Notes |
 |---|---|---|---|
 | `accountNumber` | string | yes | Broker client code, e.g. `CC12345`. |
-| `password` | string | yes | Broker trading password. The broker asks for a few random character positions of it, not the whole thing. |
+| `password` | string | yes | Broker trading password, sent whole. Until October 2026 the broker asked for a few random character positions; its new login form takes the full password. |
 
 ```json
 { "accountNumber": "CC12345", "password": "MyBrokerPass1" }
@@ -599,10 +621,9 @@ Links an AHL eTrade account to the logged-in user. The server logs in to the bro
 | Status | Body | When |
 |---|---|---|
 | 400 | `{ "error": "accountNumber and password are required." }` | Missing field. |
-| 400 | `{ "error": "Password is too short: the broker asked for character 8." }` | The broker asked for a character position beyond the password length. |
-| 401 | `{ "error": "Invalid broker credentials." }` | Broker rejected the login. |
-| 502 | `{ "error": "No session cookie was returned by the broker login page." }` | Broker site did not behave as expected. |
-| 502 | `{ "error": "No enabled Digit fields were found in the broker login page." }` | Broker login page layout changed. |
+| 400 | `{ "error": "Invalid broker credentials." }` | Broker rejected the login. 400 rather than 401, because the app signs the user out on any 401 (section 13). |
+| 400 | `{ "error": "Could not reach the broker: …" }` | Network error talking to the broker site: down, DNS, HTTPS refused. |
+| 502 | `{ "error": "The broker did not start a session." }` | The login answered without a 302 or without a session cookie, which means the broker changed its login page again. |
 
 ---
 
@@ -719,7 +740,7 @@ Example: `POST /broker/accounts/8a2e…/sync?from=2024-01-01&to=2024-12-31`
 
 | Status | Body | When |
 |---|---|---|
-| 401 | `{ "error": "Broker session expired. Reconnect the account to continue." }` | No live session, or the broker answered with its login page instead of data. |
+| 400 | `{ "error": "Broker session expired. Reconnect the account to continue." }` | No live session, or the broker answered with its login page instead of data. |
 | 404 | `{ "error": "account does not exist" }` | Not found / not yours. |
 
 ---
@@ -1073,8 +1094,8 @@ Each item in `results` is one of `{ symbol, fetched, saved }`, `{ symbol, skippe
 
 | Status | Body | When |
 |---|---|---|
-| 401 | `{ "error": "Broker session expired. Reconnect the account so a market session can be issued." }` | No broker session and no `DASHBOARD_COOKIE`. |
-| 401 | `{ "error": "The broker did not return an analytics URL." }` / `"The dashboard handoff did not return a session cookie."` | Hand-off to the analytics site failed. |
+| 400 | `{ "error": "Broker session expired. Reconnect the account so a market session can be issued." }` | No broker session and no `DASHBOARD_COOKIE`. |
+| 400 | `{ "error": "The broker did not return an analytics URL." }` / `"The dashboard handoff did not return a session cookie."` | Hand-off to the analytics site failed. |
 | 404 | `{ "error": "account does not exist" }` | Not found / not yours. |
 
 > This call fetches symbols one after another with a random one-to-three-second pause between them. With ~24 held + watched symbols it takes about a minute; the HTTP request stays open until it finishes. The pacing is deliberate — a burst of requests against the analytics site looks like a scraper, a spaced sequence looks like someone browsing.
@@ -1145,7 +1166,7 @@ The `:id` is a **broker account** id; the call needs that account's live broker 
 
 | Status | Body | When |
 |---|---|---|
-| 401 | `{ "error": "Broker session expired. Reconnect the account." }` | No live broker session. |
+| 400 | `{ "error": "Broker session expired. Reconnect the account." }` | No live broker session. |
 | 404 | `{ "error": "account does not exist" }` | Not found / not yours. |
 
 > Upserts one symbol at a time; expect a few seconds for ~550 rows.
@@ -1273,7 +1294,7 @@ Needs a live market session, because this feed wants the page token as well as t
 |---|---|---|
 | 404 | `{ "error": "security does not exist" }` | Unknown symbol. |
 | 404 | `{ "error": "No broker account linked." }` | The caller has no broker account. |
-| 401 | `{ "error": "Broker session expired. Reconnect the account so a market session can be issued." }` | No live session; link or full-sync first. |
+| 400 | `{ "error": "Broker session expired. Reconnect the account so a market session can be issued." }` | No live session; link or full-sync first. |
 
 ---
 
@@ -1307,7 +1328,7 @@ A row with `error` instead of `saved` is a stock whose call failed. ETFs come ba
 | Status | Body | When |
 |---|---|---|
 | 404 | `{ "error": "account does not exists" }` | Unknown id or not your account. |
-| 401 | `{ "error": "Broker session expired. …" }` | No live session; link or full-sync first. |
+| 400 | `{ "error": "Broker session expired. …" }` | No live session; link or full-sync first. |
 
 ---
 
@@ -1340,12 +1361,116 @@ Everything `corporate_actions` holds for one stock, newest first, read from the 
 |---|---|---|
 | 404 | `{ "error": "security does not exist" }` | Unknown symbol. |
 
+---
+
+#### 24. `POST /market/fundamentals/:symbol` 🔒
+
+Fetches one stock's four company statements from the analytics API (`/company-statement?symbol=X&interval=annual&type=…` with the types `fundamentals`, `income`, `balance` and `cashflow`) and upserts each into `fundamentals`, one row per statement, the provider's JSON saved whole (section 7.4). For a stock that is not held or watched yet this is the only way to get statements; endpoint 25 covers the rest. A statement that comes back without `fields` (an ETF) is skipped. Four provider calls with a one-to-three-second pause between them (section 10.8), so about fifteen seconds.
+
+Needs a live market session, because this feed wants the page token as well as the cookie (section 10.7). Link the account or run `full-sync` first.
+
+**Path params:** `symbol` — case-insensitive.
+
+**Success — `200 OK`**
+
+```json
+{ "message": "success", "data": { "symbol": "LCI", "saved": 4 } }
+```
+
+`saved` is the number of statements written, 0 to 4. Running it again replaces the four payloads and refreshes `fetched_at`; nothing accumulates.
+
+**Errors**
+
+| Status | Body | When |
+|---|---|---|
+| 404 | `{ "error": "security does not exist" }` | Unknown symbol. |
+| 404 | `{ "error": "No broker account linked." }` | The caller has no broker account. |
+| 400 | `{ "error": "Broker session expired. …" }` | No live session, or the provider refused part-way; link or full-sync first. |
+
+---
+
+#### 25. `POST /market/bulk-fundamentals/sync/:id` 🔒
+
+Endpoint 24 for every stock you hold or watch (`KSE100` excluded), alphabetically, with the usual pause between calls. A stock that fails is noted and skipped; a 429 or 5xx from the provider stops the run. Unlike payouts this is **not** part of the nightly job yet (limitation 26), so run it by hand after adding to the watchlist, or when a company has published new accounts. Roughly fifteen seconds per stock, so several minutes for a full portfolio.
+
+**Path params:** `id` — broker account UUID. Must belong to the caller.
+
+**Success — `200 OK`** (`results` abbreviated)
+
+```json
+{
+  "message": "success",
+  "data": {
+    "securities": 24,
+    "saved": 88,
+    "results": [
+      { "symbol": "AIRLINK", "saved": 4 },
+      { "symbol": "MIIETF", "saved": 0 },
+      { "symbol": "XYZ", "error": "Request failed with status code 500" }
+    ]
+  }
+}
+```
+
+`saved` counts statements, so a stock with full data contributes 4. ETFs come back with `saved: 0`.
+
 **Errors**
 
 | Status | Body | When |
 |---|---|---|
 | 404 | `{ "error": "account does not exist" }` | Unknown id or not your account. |
-| 401 | `{ "error": "Broker session expired. …" }` | No live session; link or full-sync first. |
+| 400 | `{ "error": "Broker session expired. …" }` | No live session; link or full-sync first. |
+
+---
+
+#### 26. `GET /market/valuation/:symbol` 🔒
+
+A **reverse DCF**. Instead of guessing a fair value, it asks the opposite question: given today's price, what yearly growth in cash is the market assuming for the next five years? That number sits next to the growth the company actually delivered, so the reader judges whether the price expects more or less than the past. Everything is computed on read from `fundamentals`, `corporate_actions` and `daily_prices`; nothing is stored, no provider call, no session needed. The maths lives in `src/utils/valuation.js`.
+
+How the number is built:
+
+1. **Starting cash.** The average of the latest three fiscal years. For most companies that is free cash flow: operating cash flow plus the (negative) purchases of fixed and intangible assets plus dividends received. If that average is not positive, profit after tax is used instead and `basis` says `"profit"`. For banks (sector `COMMERCIAL BANKS`) operating cash flow means nothing, so the dividends they paid are used (`"dividends paid"`). Fewer than three fiscal years on record means "not applicable".
+2. **Share count.** Paid-up share capital on the latest balance sheet divided by par. Par is Rs 10 divided by every recorded `SPLIT` ratio in `corporate_actions`, because the provider's own share counts and per-share figures break after a split. The result is cross-checked against the provider's latest fiscal-year share count, moved into today's share units; more than 5 % apart and the stock answers "share count could not be confirmed" rather than a wrong number.
+3. **Market cap** = latest stored close × shares.
+4. **Discount rate** `r` = risk-free 11 % + equity premium 6 % = 17 %. Terminal growth 5 %, growth period 5 years (`constants.js`). The implied growth is the rate at which the starting cash, grown for five years and then at the terminal rate for ever, discounted at `r`, adds up to the market cap. It is found by bisection between −50 % and +100 %, two hundred halvings, the same trick as XIRR.
+5. **Delivered growth** = compound yearly growth of profit after tax from the oldest fiscal year in the income statement to the latest, up to seven years. Null when either end is missing or not positive.
+6. **Sensitivity**: the implied growth again at `r − 1 %` and `r + 1 %`, so the reader sees how much the answer leans on the discount rate.
+
+Statements are stored in Rs thousands, so `shares`, `marketCap` and `startingCash` are multiplied by 1,000 on the way out. Growth figures are percentages, rounded to two decimals.
+
+**Path params:** `symbol` — case-insensitive.
+
+**Success — `200 OK`** (values illustrative)
+
+```json
+{
+  "message": "success",
+  "data": {
+    "symbol": "LCI",
+    "applicable": true,
+    "asOf": "2026-10-09",
+    "price": 420.5,
+    "shares": 1468000000,
+    "marketCap": 617294000000,
+    "basis": "free cash flow",
+    "startingCash": 48100000000,
+    "assumptions": { "r": 0.17, "terminalGrowth": 0.05, "years": 5 },
+    "impliedGrowth": 18.6,
+    "profitGrowth": 21.4,
+    "sensitivity": { "rMinus1": 16.9, "rPlus1": 20.3 }
+  }
+}
+```
+
+Read it as: "at Rs 420 the market is pricing LCI as if its cash grows 18.6 % a year for five years; it has delivered 21.4 % a year on profit". A negative `impliedGrowth` means the price already assumes shrinking cash (HUBC, for instance).
+
+When the number cannot be computed honestly the endpoint still answers `200`, with `applicable: false` and a `reason`: `"no statements for this stock"` (run endpoint 24 first), `"no price for this stock"`, or `"share count could not be confirmed"`. A stock with no positive cash to value should answer the same way but currently crashes (limitation 28).
+
+**Errors**
+
+| Status | Body | When |
+|---|---|---|
+| 404 | `{ "error": "security does not exist" }` | Unknown symbol. |
 
 ---
 
@@ -1443,26 +1568,24 @@ sequenceDiagram
     participant M as In-memory session store
 
     C->>API: POST /broker/accounts {accountNumber, password}
-    API->>B: GET / (login page)
-    B-->>API: HTML + Set-Cookie .AspNetCore.Session
-    Note over API: Parse which "DigitN" inputs are enabled,<br/>e.g. [1, 4, 7]
-    API->>B: POST /Home/_Login<br/>UserName=CC12345&Digit1=M&Digit4=r&Digit7=e<br/>(cookie: session)
-    B-->>API: HTML (+ refreshed cookies: session, trader, HouseName)
-    alt HTML contains "Invalid Login Credentials"
-        API-->>C: 401 Invalid broker credentials
-    else login OK
+    API->>B: POST /Home/_Login<br/>UserName=CC12345&Password=…<br/>(maxRedirects: 0)
+    alt 302 → /Home/Index + Set-Cookie .AspNetCore.Session, trader, HouseName
         API->>DB: upsert broker_accounts (user, AHL_ETRADE, clientCode)
         API->>DB: upsert portfolios (name "AHL CC12345")
         API->>M: saveSession(brokerAccountId, cookies) — 15 min TTL
-        API-->>C: 200 {brokerAccountId, portfolioId, …}
+        API-->>C: 200 {brokerAccountId, portfolioId}
+    else 200 page containing "Invalid Login Credentials"
+        API-->>C: 400 Invalid broker credentials
+    else anything else (no 302, no cookie)
+        API-->>C: 502 The broker did not start a session
     end
 ```
 
 Key points:
 
-- **Partial password.** The broker's login form shows one input per password character but only enables a few random positions each time. The backend reads the HTML to find which positions are enabled and sends only those characters (`buildLoginBody`). This is why the whole password is needed in the request but only some characters go to the broker.
-- **No redirects.** Axios is told `maxRedirects: 0`. A successful login answers with a `302` and the cookies we need are on that response; following the redirect would lose them.
-- **Failure detection.** The broker returns HTTP 200 even on a wrong password. The only signal is the text `Invalid Login Credentials` in the HTML.
+- **Whole password.** Since the broker rebuilt its website in early October 2026 ("Web Trade Cast"), the login is a plain form: `UserName` and `Password` posted to `/Home/_Login`. The old form, which enabled a few random character positions (`Digit1`, `Digit4`, …) and made the backend parse the page first, is gone, and so is the parsing code.
+- **No redirects.** Axios is told `maxRedirects: 0`. A successful login answers with a `302` to `/Home/Index` and the cookies we need (`.AspNetCore.Session`, `trader`, `HouseName`) are on that response; following the redirect would lose them.
+- **Failure detection.** A wrong password answers HTTP 200 with a page containing `Invalid Login Credentials`, which becomes a `400`. Anything else that is not a 302 with a session cookie is a `502`, the signal that the broker changed its page again. A network error (site down, HTTPS refused, as happened on the night of 1 October 2026) is a `400` with `Could not reach the broker: …`.
 
 ### 10.2 Syncing trades
 
@@ -1549,13 +1672,13 @@ If the market API answers `401` mid-run, the cached cookie is thrown away so the
 1. `brokerLogin` with the decrypted password (`src/utils/secrets.js`, AES-256-GCM, key from `CREDENTIALS_KEY`);
 2. `syncAccount` — the same code as `POST /broker/accounts/:id/sync`: trades, holdings, positions, today's close from `mtmPrice`;
 3. `syncPricesForAccount` — the same code as `POST /market/sync/:id`: missing daily bars for held + watched symbols and `KSE100`;
-4. `getAllSecuritiesPayoutPerAccount` — the same code as `POST /market/bulk-payouts/sync/:id`: dividends, bonuses and rights for held + watched symbols into `corporate_actions`, which is how announced ex-dates ahead reach the app.
+4. `saveAllSecuritiesPayoutPerAccount` — the same code as `POST /market/bulk-payouts/sync/:id`: dividends, bonuses and rights for held + watched symbols into `corporate_actions`, which is how announced ex-dates ahead reach the app. Company statements are **not** refreshed here yet (endpoint 25, limitation 26).
 
 `syncStatus` on the account is `syncing` while it runs, `idle` on success (with `lastSyncedAt`), `error` on failure; failures are logged to the console and the next account still runs. The app's Portfolio header shows this as "Synced 8 Sep, 17:32" / "Last sync failed". `POST /broker/accounts/:id/full-sync` runs the same routine on demand.
 
 ### 10.7 Token endpoints on the analytics API
 
-Some dashboard endpoints (`company-statement` for fundamentals, `payouts/*`, `news/*`) need a **bearer token as well as the cookie**. Every dashboard page embeds a fresh token in `<meta name="access-token">`, and the previous one stops working. `fetchDashboardApi(path, params, account)` in `services/dashboardApi.js` loads one page per market session to read it, caches it next to the cookie, and on a 401 (a browser tab rotated it) fetches a new one and retries once. The payouts endpoints (20, 21) use it; fundamentals are next on the roadmap.
+Some dashboard endpoints (`company-statement` for fundamentals, `payouts/*`, `news/*`) need a **bearer token as well as the cookie**. Every dashboard page embeds a fresh token in `<meta name="access-token">`, and the previous one stops working. `fetchDashboardApi(path, params, account)` in `services/dashboardApi.js` loads one page per market session to read it, caches it next to the cookie, and on a 401 (a browser tab rotated it) fetches a new one and retries once. The payouts endpoints (20, 21) and the statements endpoints (24, 25) use it.
 
 ### 10.8 Looking like the browser
 
@@ -1673,8 +1796,8 @@ Every endpoint, auth included, uses this shape. Clients can read `error` and sho
 |---|---|
 | 200 | OK |
 | 201 | Created (register) |
-| 400 | Bad input (missing field, duplicate email, short password) |
-| 401 | Not logged in / token problem / broker session expired / broker login wrong |
+| 400 | Bad input (missing field, duplicate email, short password), **and any problem with the broker or the market data provider**: wrong broker password, session expired, broker unreachable (`BROKER_PROBLEM_STATUS` in `constants.js`). These were 401 until 2026-09-20; the app signs the user out on any 401, so a mistyped broker password used to log people out. |
+| 401 | Not logged in or a token problem: our own login only. |
 | 404 | Broker account not found or not yours |
 | 502 | The broker website did not respond the way we expected |
 | 500 | Unexpected error. The global handler in `server.js` answers `{ "error": "Something went wrong." }` and logs the real message to the console. |
@@ -1698,7 +1821,7 @@ These are facts about the code as it is today. They are listed so nobody is surp
 6. ~~No global Express error handler → unexpected errors return HTML, not JSON.~~ Fixed: unknown routes return `404 { "error" }` and thrown errors `500 { "error": "Something went wrong." }`, logged to the console.
 7. ~~`PATCH …/disconnect` does not clear the in-memory broker session, so `sync` keeps working for up to 15 minutes after "disconnect".~~ Fixed: `disconnectAccount` calls `clearSession`.
 8. Broker sessions live only in memory (see section 12): lost on restart, not shared across instances.
-9. `POST /market/sync/:id` and `POST /market/bulk-payouts/sync/:id` process symbols one at a time inside a single HTTP request, with a random one-to-three-second pause between them (section 10.8), so each takes about a minute for 24 symbols. The nightly job (section 10.6) does the same work unattended, so these requests are only for a manual refresh; a long watchlist would still make them slow.
+9. `POST /market/sync/:id`, `POST /market/bulk-payouts/sync/:id` and `POST /market/bulk-fundamentals/sync/:id` process symbols one at a time inside a single HTTP request, with a random one-to-three-second pause between them (section 10.8), so each takes about a minute for 24 symbols. The nightly job (section 10.6) does the same work unattended, so these requests are only for a manual refresh; a long watchlist would still make them slow.
 
 **Data quality**
 
@@ -1720,10 +1843,18 @@ These are facts about the code as it is today. They are listed so nobody is surp
 
 **Corporate actions and dividends**
 
-22. Splits and mergers are not in the provider's payouts feed, so they are entered by hand as `manual` rows in `corporate_actions` (one `INSERT` each, or a small POST route later). Entered so far: BAFL two-for-one on 2026-04-20 and ENGRO → ENGROH at 2.24407865 on 2025-01-14. Not yet entered: LCI's five-for-one split in 2025; it predates the LCI buys so the position is right, but any per-share history that crosses it (yield) is off by five until the row exists.
-23. Payouts are synced only for held + watched stocks. A stock has no dividend history until it is held or on the watchlist, and ENGROH, held since 2026-09-10, has no rows until the next nightly sync runs.
-24. `GET /portfolio/:id/dividend-income` is gross: PSX withholds 15 % for filers before the money reaches the account. It ignores mergers (no ENGROH dividends after the swap) and does not list bonus shares received.
+22. Splits and mergers are not in the provider's payouts feed, so they are entered by hand as `manual` rows in `corporate_actions` (one `INSERT` each, or a small POST route later). Entered so far: BAFL two-for-one on 2026-04-20 and ENGRO → ENGROH at 2.24407865 on 2025-01-14. Entered since: LCI five-for-one on 2025-07-21 and SYS five-for-one on 2025-06-04. Any new split or merger still has to be typed in by hand.
+23. Payouts are synced only for held + watched stocks. A stock has no dividend history until it is held or on the watchlist, so a newly held or watched stock has no rows until the next nightly sync runs.
+24. `GET /portfolio/:id/dividend-income` is gross: PSX withholds 15 % for filers before the money reaches the account. Since 2026-09-20 merged shares count (ENGROH dividends after the swap), but bonus shares received are still not listed.
 25. Dividends before a split or bonus are per *old* share. Anything that sums them across such an event, a twelve-month yield for instance, must divide each one by every later ratio first. Nothing does this yet; raw BAFL sums come out about double.
+
+**Fundamentals and valuation**
+
+26. Company statements are fetched only on demand (endpoints 24, 25); the nightly job does not refresh them, so a stock's valuation can sit on last year's accounts until someone runs the bulk sync.
+27. The risk-free rate in the reverse DCF is a constant 11 % in `constants.js`, meant to be the 10-year PIB yield. The provider's `indicators` feed has the live rate; it is not read yet.
+28. `GET /market/valuation/:symbol` crashes (500) when `startingCash` finds no positive cash to value: the `if (cash === null)` guard in `valuationController.js` is an empty block, so the code falls through to `cash.cash`. It should answer `applicable: false` with reason "no positive cash to value".
+29. The share count assumes a par value of Rs 10 adjusted by recorded splits. A stock with another par (NATF, Rs 5) or an inconsistent provider history (MTL) fails the 5 % cross-check and answers "share count could not be confirmed".
+30. Statements are stored in Rs thousands exactly as the provider sends them; the valuation multiplies by 1,000 on the way out. Any new reader must remember the unit.
 
 ---
 
