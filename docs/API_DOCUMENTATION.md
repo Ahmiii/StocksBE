@@ -476,7 +476,7 @@ Every protected endpoint filters by `req.user.id`. A user can only see or change
 
 ## 9. API reference
 
-**Base URL:** `http://localhost:5001` (local)
+**Base URL:** `https://homelab.tail4b18fa.ts.net` (public, through Tailscale Funnel on the home server) · `http://100.83.108.85:5001` (Tailscale direct) · `http://localhost:5001` (local)
 **Content type:** all request and response bodies are JSON.
 **Auth:** 🔒 = needs `Authorization: Bearer <token>`.
 
